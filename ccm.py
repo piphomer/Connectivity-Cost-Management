@@ -11,7 +11,7 @@ from datetime import datetime as dt
 
 import ccm_replica as rep
 
-supplier_list = ['WL', 'Aeris', 'Eseye']
+supplier_list = ['WL', 'Aeris', 'Eseye', 'Intelligent']
 
 ########################################################################
 # Setup some variable assignments
@@ -183,12 +183,16 @@ def grouped_report_file_name(month, supplier):
 
 def get_invoice_list(supplier):
 
-    ### Wireless Logic ###
+    ### Wireless Logic and WL Intelligent ###
 
-    if supplier == 'WL':
+    if supplier == 'WL' or supplier == 'Intelligent':
     
         # Get list of available invoices
-        URL = WIRELESS_LOGIC_API_BASE + "invoices?_format=json&billing-account=" + BBOXX_ACCOUNT_WL
+        if supplier == 'WL':
+            URL = WIRELESS_LOGIC_API_BASE + "invoices?_format=json&billing-account=" + BBOXX_ACCOUNT_WL
+
+        else:
+            URL = WIRELESS_LOGIC_API_BASE + "invoices?_format=json&billing-account=" + BBOXX_ACCOUNT_INTELLIGENT
 
         try: #if internet connection exists
 
@@ -198,6 +202,9 @@ def get_invoice_list(supplier):
 
             if r.status_code == 200:
                 print "Invoice list succesfully downloaded."
+            else:
+                print "Need to add an error handler!"
+                return
 
             r_json = r.json()
 
@@ -237,6 +244,8 @@ def get_invoice_list(supplier):
                 #print invdict
 
             return invoice_list
+
+
 
     ### Aeris ####
 
@@ -315,6 +324,10 @@ def get_new_invoices(invoice_list, supplier):
 
                 if r.status_code == 200:
                     print "complete!"
+
+                if r.status_code == 500:
+                    print "Bummer. WL API cannot retrieve this invoice at this time"
+                    return
 
                 print r.text
 
@@ -610,7 +623,11 @@ def create_wl_report(supplier, invoice, WL_SIMS_PRODUCT_ENTITY):
     #grouped_report_file = grouped_report_file_name(invoice)
 
     #Read the invoice file
-    report_df = pd.read_csv(invoice_path + invoice_file, dtype={'ctn': str})
+    try:
+        report_df = pd.read_csv(invoice_path + invoice_file, dtype={'ctn': str})
+    except:
+        print "Invoice {} does not seem to exist! Skipping...".format(invoice_file)
+        return
 
     #Just keep the columns we're interested in
 
