@@ -17,13 +17,15 @@ supplier_list = ['WL', 'Aeris', 'Eseye']
 # Setup some variable assignments
 ########################################################################
 
-# WL #
+# WL & WL INTELLIGENT #
 
 WIRELESS_LOGIC_API_BASE = "https://simpro4.wirelesslogic.com/api/v3/"
 
-BBOXX_ACCOUNT = '110860'
+BBOXX_ACCOUNT_WL = '110860'
+BBOXX_ACCOUNT_INTELLIGENT = '115106'
 
-AUTH = ('p.homer@bboxx.co.uk','Bb0XxS1MPR0')
+AUTH = ('p.homer@bboxx.co.uk','Bb0XxS1MPr0#')
+
 
 
 # Eseye #
@@ -132,7 +134,7 @@ def get_entities():
 ########################################################################
 
 def invoice_path_name(supplier):
-    invoice_path = 'C:/Users/phill/Documents/Projects/Connectivity Cost Management/invoices/csv/{}/'.format(supplier)
+    invoice_path = 'C:/Users/phill/Documents/Projects/Connectivity Cost Management/invoices/{}/csv/'.format(supplier)
     return invoice_path
 
 def invoice_file_name(invoice):
@@ -186,7 +188,7 @@ def get_invoice_list(supplier):
     if supplier == 'WL':
     
         # Get list of available invoices
-        URL = WIRELESS_LOGIC_API_BASE + "invoices?_format=json&billing-account=" + BBOXX_ACCOUNT
+        URL = WIRELESS_LOGIC_API_BASE + "invoices?_format=json&billing-account=" + BBOXX_ACCOUNT_WL
 
         try: #if internet connection exists
 
@@ -314,6 +316,8 @@ def get_new_invoices(invoice_list, supplier):
                 if r.status_code == 200:
                     print "complete!"
 
+                print r.text
+
                 r_json = make_df(r.json())
 
                 r_json.to_csv(invoice_path + invoice_file)
@@ -432,7 +436,7 @@ def create_grouped_report(invoice, report_df, supplier, currency = 'GBP'):
 
 def get_WL_SIMS():
 
-    URL = WIRELESS_LOGIC_API_BASE + "sims?_format=json&billing-account=" + BBOXX_ACCOUNT
+    URL = WIRELESS_LOGIC_API_BASE + "sims?_format=json&billing-account=" + BBOXX_ACCOUNT_WL
 
     r = requests.get(url=URL, auth=AUTH)
 
