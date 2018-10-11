@@ -24,7 +24,10 @@ WIRELESS_LOGIC_API_BASE = "https://simpro4.wirelesslogic.com/api/v3/"
 BBOXX_ACCOUNT_WL = '110860'
 BBOXX_ACCOUNT_INTELLIGENT = '115106'
 
-AUTH = ('p.homer@bboxx.co.uk','Bb0XxS1MPr0#')
+WL_USERNAME = os.environ['WL_USERNAME']
+WL_PASSWORD = os.environ['WL_PASSWORD']
+
+AUTH = (WL_USERNAME,WL_PASSWORD)
 
 
 
@@ -134,7 +137,7 @@ def get_entities():
 ########################################################################
 
 def invoice_path_name(supplier):
-    invoice_path = 'C:/Users/phill/Documents/Projects/Connectivity Cost Management/invoices/{}/csv/'.format(supplier)
+    invoice_path = './invoices/{}/csv/'.format(supplier)
     return invoice_path
 
 def invoice_file_name(invoice):
@@ -172,8 +175,7 @@ def grouped_report_file_name(month, supplier):
         dateobject = dt.strptime(month, "%Y%m%d")
         
     #Generate a nicer date string to name the report by
-    grouped_report_file = "C:/Users/phill/Documents/Projects/Connectivity Cost Management/CCM Reports/" \
-                                + dt.strftime(dateobject, "%Y-%m (%b)") + " - {} - CCM Report.csv".format(supplier)
+    grouped_report_file = "./CCM Reports/" + dt.strftime(dateobject, "%Y-%m (%b)") + " - {} - CCM Report.csv".format(supplier)
     
     return grouped_report_file
 
@@ -190,7 +192,6 @@ def get_invoice_list(supplier):
         # Get list of available invoices
         if supplier == 'WL':
             URL = WIRELESS_LOGIC_API_BASE + "invoices?_format=json&billing-account=" + BBOXX_ACCOUNT_WL
-
         else:
             URL = WIRELESS_LOGIC_API_BASE + "invoices?_format=json&billing-account=" + BBOXX_ACCOUNT_INTELLIGENT
 
@@ -219,6 +220,8 @@ def get_invoice_list(supplier):
                 invdict = {'invref': invref, 'date' : invdate}
                 invoice_list.append(invdict)
             
+            print invoice_list
+
             return invoice_list
 
         except: #if no internet connection exists, just look at already downloaded invoices
@@ -260,8 +263,13 @@ def get_invoice_list(supplier):
 
         for invoice in interim_list:
 
+            print invoice
+
             #split the invoice file name into date and reference number
-            invdate, invref = invoice.split("_")
+            try:
+                invdate, invref = invoice.split("_")
+            except:
+                print "Invoice may be incorrectly named (check for hyphen instead of underscore?)"
 
             #remove the .csv extension
             invref = invref.replace(".csv","")
@@ -270,6 +278,8 @@ def get_invoice_list(supplier):
             invoice_list.append(invdict)
 
             #print invdict
+
+        print invoice_list
         
         return invoice_list
 
@@ -618,7 +628,7 @@ def create_wl_report(supplier, invoice, WL_SIMS_PRODUCT_ENTITY):
     
 
     report_file = report_file_name(invoice, supplier)
-    report_path = 'C:/Users/phill/Documents/Projects/Connectivity Cost Management/Full Reports/{}/'.format(supplier)
+    report_path = './Full Reports/{}/'.format(supplier)
 
     #grouped_report_file = grouped_report_file_name(invoice)
 
@@ -733,7 +743,7 @@ def create_aeris_report(supplier, invoice, report_df):
 
     # invoice_file = invoice_file_name(invoice)
     report_file = report_file_name(invoice, supplier)    
-    report_path = 'C:/Users/phill/Documents/Projects/Connectivity Cost Management/Full Reports/{}/'.format(supplier)
+    report_path = './Full Reports/{}/'.format(supplier)
     
     #If entity field is blank, SIM has likely been provisioned but not put in a product yet
     report_df = report_df.fillna(value = {'entity_id': 0, 'name': 'Product not in SmartSolar'})
