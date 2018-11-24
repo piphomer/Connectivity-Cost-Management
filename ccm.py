@@ -11,8 +11,7 @@ from datetime import datetime as dt
 
 import ccm_replica as rep
 
-supplier_list = ['WL','Aeris', 'Eseye', 'Intelligent']
-supplier_list = ['WL']
+supplier_list = ['WL','Intelligent','Aeris', 'Eseye']
 
 
 ########################################################################
@@ -64,10 +63,10 @@ def make_df(data):
 def get_entities():
 
     db = rep.ReplicaDatabase()
-    #rep.download_table(db, 'product', save_json = True, debug = True)
-    #rep.download_table(db, 'state', save_json=True, debug=True)
-    #rep.download_table(db, 'entity', save_json=True, debug=True)
-    #rep.download_table(db, 'product_entity_linker', save_json=True, debug=True)
+    # rep.download_table(db, 'product', save_json = True, debug = True)
+    # rep.download_table(db, 'state', save_json=True, debug=True)
+    # rep.download_table(db, 'entity', save_json=True, debug=True)
+    # rep.download_table(db, 'product_entity_linker', save_json=True, debug=True)
 
     print "Opening Products table..."
     with open('tables/product.json', 'rb') as rf:
@@ -75,23 +74,25 @@ def get_entities():
         print products_df.shape[0], " products found in SmartSolar"
 
 
-    # with open('../../outputs/state.json', 'rb') as rf:
-    #     states=make_df(json.load(rf))
+    # with open('tables/state.json', 'rb') as rf:
+    #     states_df = make_df(json.load(rf))
     # print "got states"
 
     print "Opening Entities table..."
     with open('tables/entity.json', 'rb') as rf:
         entities_df = make_df(json.load(rf))
-    
+        #Just keep the entity_id and name
+        entities_df = entities_df[['entity_id','name']]
+
     print "Opening Product/Entity Linker table..."
     with open('tables/product_entity_linker.json', 'rb') as rf:
-        product_entity_linker_df = make_df(json.load(rf))
+        pel_df = make_df(json.load(rf))
         #Just take imei, entity id and date removed from the product_entity_linkers table
-        product_entity_linker_df = product_entity_linker_df[['product_imei','entity_id','date_added','date_removed']]
+        pel_df = pel_df[['product_imei','entity_id','date_added','date_removed']]
 
 
-    #Join product_entity_linker and entity (just id and name) tables
-    product_entity_df = product_entity_linker_df.merge(entities_df[['entity_id','name']], on='entity_id')
+    #Join pel_df and entity_df
+    product_entity_df = pel_df.merge(entities_df, on='entity_id')
 
     #only keep rows where date_removed is null (i.e. only keep current entity records)
     product_entity_df = product_entity_df[product_entity_df.date_removed.isnull()]
@@ -104,13 +105,12 @@ def get_entities():
 
 
     print "Looking for IMEIs with multiple entities..."
-    print "Found the following..."
 
     for imei, group in product_entity_df.groupby('product_imei'):
 
         if group.shape[0] > 1: #only look at imei's with more than one current entity
 
-            print imei
+            #print imei
 
             #First, remove this IMEI from the dataframe entirely. We will then add back in only the row we deem relevant
             product_entity_df = product_entity_df.drop(imei)
@@ -118,6 +118,7 @@ def get_entities():
             group = group[group['name'] != 'BBOXX Engineering'] #remove rows that are BBOXX Engineering
             group = group[group['name'] != 'BBOXX Asia'] #remove rows that are BBOXX Asia 
             group = group[group['name'] != 'Orange Energy All'] #remove rows that are Orange Energy All 
+            group = group[group['name'] != 'Aceleron'] #remove rows that are Aceleron
             
             if group.shape[0] > 1: #if there is STILL more than one IMEI on this entity...
                 group['date_added_copy'] = pd.to_datetime(group['date_added']) #add a column with a pandas datetime or it won't sort properly
@@ -132,6 +133,8 @@ def get_entities():
 
     #Join the Product table so we can get the IMSI and the ICCID
     product_entity_df = product_entity_df.merge(products_df[['imsi','iccid','product_imei']], left_index=True, right_on='product_imei')
+
+    product_entity_df.set_index('product_imei', inplace=True)
 
     product_entity_df.to_csv("product_entity.csv")
 
@@ -184,7 +187,6 @@ def make_grouped_report_filename(month, supplier):
 
 
 ####################################################################################################
-
 
 def get_invoice_list(supplier):
 
@@ -403,13 +405,13 @@ def create_grouped_report(invoice, supplier, currency = 'GBP'):
 
     #Group the results by entity
     grouped_df = report_df[['entity_name','tariff_name','rental','data','sms','total']]
-    print grouped_df.head(50)
-    print grouped_df['total'].sum()
+    # print grouped_df.head(50)
+    # print grouped_df['total'].sum()
 
     grouped_df = grouped_df.groupby(['entity_name','tariff_name'], \
                     axis = 0).agg({'rental': 'sum','data': 'sum','sms': 'sum','total' : ['sum', 'count']})
-    print grouped_df.head(50)
-    print grouped_df['total'].sum()
+    # print grouped_df.head(50)
+    # print grouped_df['total'].sum()
 
     #Flatten the column indexes
     grouped_df = grouped_df.reset_index()
@@ -425,7 +427,7 @@ def create_grouped_report(invoice, supplier, currency = 'GBP'):
                                                         'data sum': 'data',
                                                         'total sum': 'total'})
 
-    print grouped_df['total'].sum()
+    # print grouped_df['total'].sum()
 
     #Add a column with the invoice month to filter on in Power BI
     try:
@@ -477,7 +479,7 @@ def get_df_of_wl_sims():
     #Make a dataframe with all (WL and Intelligent) SIMs
     wl_sims_df = make_df(r_json)
 
-    print "Number of WL + Intelligent SIMs: {}".format(len(sims_df))
+    print "Number of WL + Intelligent SIMs: {}".format(len(wl_sims_df))
 
     wl_sims_df.to_csv('WL_sims.csv')
 
@@ -506,6 +508,8 @@ def get_df_of_wl_tariffs():
 
     for page in range(page_count + 1):
 
+        print page
+
         #empty the string
         iccid_string = ""
 
@@ -514,9 +518,10 @@ def get_df_of_wl_tariffs():
         
         for number in range(iccids_per_call):
             try:
-                iccid_string = iccid_string +"," + sims_list[start_iccid + number]
+                iccid_string = iccid_string +"," + wl_sims_list[start_iccid + number]
             except:
                 print "Error in generating the iccid string to send to the API!"
+                print "These are probably just the last page phantom ones"
 
         URL = WIRELESS_LOGIC_API_BASE + "sims/details?_format=json&iccid=" + iccid_string
 
@@ -557,68 +562,116 @@ def get_df_of_wl_tariffs():
     wl_tariffs_df.columns = ['iccid','tariff_name','mno_account']
 
     #Now,
-    #sims_df contains a set of sims: iccid, id, imsi, msisdn, status, workflow
-    #tariffs_df contains the iccids of those SIMs plus their associated tariff details
+    #wl_sims_df contains a set of sims: iccid, id, imsi, msisdn, status, workflow_status
+    #wl_tariffs_df contains the iccids of those SIMs plus their associated tariff name and mno account
     #So now merge the two:
     wl_sims_plus_tariffs_df = wl_sims_df.merge(wl_tariffs_df, on="iccid")
 
+    #Make the iccid the index
+    wl_sims_plus_tariffs_df.set_index('iccid', inplace=True)
+
+    #Resulting dataframe contains account details for ALL WL SIMs including Intelligent
     print "Writing csv file..."
-    wl_sims_plus_tariffs_df.to_csv('WL_sims_plus_tariffs.csv')
+    wl_sims_plus_tariffs_df.to_csv('wl_sims_plus_tariffs.csv')
     print "Success!"
 
     return wl_sims_plus_tariffs_df
 
 ####################################################################################################
 
-def add_product_entity_and_ctn():
+# This function takes the product_entity_df (containing details of which entity each product is 
+# assigned to) and adds the tariff information from previous function
+
+def wl_add_product_entity_and_ctn(supplier):
 
     updateWSPE = raw_input("make new WL_SIMS_PRODUCT_ENTITY?") #debug. Delete later
 
-    if updateWSPE == "y":
-             
+    
+    if supplier == "WL":
 
-        #Get rid of any entries with no imsi
-        #product_entity = product_entity[product_entity.imsi.notnull()]
+        if updateWSPE == "y":             
 
-        #Join entity table to sim table
-        product_entity_df.imsi = product_entity_df.imsi.astype('str')
-        # wl_sims_plus_tariffs_df.imsi = wl_sims_plus_tariffs_df.imsi.astype('str')
-        # wl_sims_plus_tariffs_df.msisdn = wl_sims_plus_tariffs_df.msisdn.astype('str')
+            #Copy the product_entity_df into a new df and take product_imei out of the index
+            wl_product_entity_df = product_entity_df.reset_index()
 
-        #Merging on IMSI seems super risky given Intelligent SIMs are multi-IMSI
-        #IMSI for a given product on an invoice could change randomly if different IMSI selected on SIM
-        #But have to because SmartSolar doesn't have ICCIDs for old WL SIMs
-        #An alternative would be to break out the WL_SIMS_PLUS_TARIFFS df into two
-        #One for WL and one for Intelligent.. then do the Intelligent merge on ICCID
-        wl_sims_product_entity_df = wl_sims_plus_tariffs_df.merge(product_entity_df, how="left", on="imsi")
-        print wl_sims_product_entity_df.head(20)
-        raw_input("?")
-       
-        # Create a CTN column in order to be able to join to the invoices
-        # Because the WL invoices only give costs against CTN, not ICCID or any other fixed reference
-        # - if mno account is Vodafone Global, ctn = imsi
-        # - otherwise ctn = msisdn
+            #Get rid of iccid's from wl_product_entity_df as they are anyway present in the invoice
+            #and we aren't matching on them
+            wl_product_entity_df.drop(['iccid'], axis=1, inplace=True)
 
-        print "Adding CTNs to dataframe..."
+            #Join the product_entity dataframe to the wl_sims_plus_tariffs dataframe
+            wl_sims_product_entity_df = wl_sims_plus_tariffs_df.merge(wl_product_entity_df, how="left", on="imsi")
+
+            #Drop the Intelligent SIMs from this dataframe
+            wl_sims_product_entity_df = wl_sims_product_entity_df[wl_sims_product_entity_df.mno_account != 'intelligent']
+                                   
+            # Create a CTN column in order to be able to join to the invoices
+            # Because the WL invoices only give costs against CTN, not ICCID or any other fixed reference
+            # - if mno account is Vodafone Global, ctn = imsi
+            # - otherwise ctn = msisdn
+
+            print "Adding CTNs to dataframe..."
+
+            def add_ctn(wl_sims_product_entity_df):
+                if wl_sims_product_entity_df['mno_account'] == 'Vodafone Global':
+                    wl_sims_product_entity_df['ctn'] = wl_sims_product_entity_df['imsi']
+                else:
+                    wl_sims_product_entity_df['ctn'] = wl_sims_product_entity_df['msisdn']
+
+                return wl_sims_product_entity_df
+
+            # Run the .apply function over the dataframe
+            wl_sims_product_entity_df = wl_sims_product_entity_df.apply(add_ctn,axis=1)
+
+            #Set iccid to be index
+            wl_sims_product_entity_df.set_index('iccid', inplace=True)
+
+            wl_sims_product_entity_df.to_csv("wl_sims_product_entity.csv")
+
+
+        else:
+            wl_sims_product_entity_df = pd.read_csv("wl_sims_product_entity.csv",
+                                                    dtype={"imsi": str, "msisdn": str, "iccid": str})
         
-        def add_ctn(wl_sims_product_entity_df):
-            if wl_sims_product_entity_df['mno_account'] == 'Vodafone Global':
-                wl_sims_product_entity_df['ctn'] = str(wl_sims_product_entity_df['imsi'])
-            else:
-                wl_sims_product_entity_df['ctn'] = str(wl_sims_product_entity_df['msisdn'])
-
-            return wl_sims_product_entity_df
-
-        # Run the .apply function over the dataframe
-        wl_sims_product_entity_df = wl_sims_product_entity_df.apply(add_ctn,axis=1)
-
-        wl_sims_product_entity_df.to_csv("WL_sims_product_entity.csv")
-
         return wl_sims_product_entity_df
+
+    elif supplier == "Intelligent":
+
+        if updateWSPE == "y":
+
+            intelligent_product_entity_df = product_entity_df.reset_index().drop(['index'], axis=1)
+
+            intelligent_product_entity_df.drop(['imsi'], axis=1, inplace=True)
+
+            #Only keep entries that are intelligent SIMs
+            #intelligent_sims_plus_tariffs_df = wl_sims_plus_tariffs_df[wl_sims_plus_tariffs_df.mno_account == "intelligent"]
+            intelligent_sims_plus_tariffs_df = wl_sims_plus_tariffs_df[wl_sims_plus_tariffs_df.mno_account != 'O2 Global']
+            intelligent_sims_plus_tariffs_df = intelligent_sims_plus_tariffs_df[intelligent_sims_plus_tariffs_df.mno_account != 'Vodafone Global']
+
+            intelligent_sims_plus_tariffs_df = intelligent_sims_plus_tariffs_df.reset_index()
+
+            #Merge product_entity to intelligent_sims_plus_tariffs
+            intelligent_sims_product_entity_df = pd.merge(intelligent_sims_plus_tariffs_df,
+                                                                    intelligent_product_entity_df, on="iccid", how="left")
+
+            #Add a CTN which is just the MSISDN, to join to the invoice on
+            intelligent_sims_product_entity_df['ctn'] = intelligent_sims_product_entity_df['msisdn']
+
+            #Set iccid to be index
+            intelligent_sims_product_entity_df.set_index('iccid', inplace=True)
+
+            #Drop a bunch of unwanted flotsam including the IMSI which is not used on Intelligent
+            intelligent_sims_product_entity_df.drop(['index', 'imsi'], axis=1, inplace=True)
+
+            #Output to csv
+            intelligent_sims_product_entity_df.to_csv("intelligent_sims_product_entity.csv")
+
+        else:
+            intelligent_sims_product_entity_df = pd.read_csv("intelligent_sims_product_entity.csv", dtype = {'ctn': str})
+        
+        return intelligent_sims_product_entity_df
 
     else:
-        wl_sims_product_entity_df = pd.read_csv("WL_sims_product_entity.csv", dtype={'ctn': str})
-        return wl_sims_product_entity_df
+        print "Well, this is awkward..."
 
 ####################################################################################################
 
@@ -634,7 +687,8 @@ def create_wl_report(supplier, invoice):
 
     #Read the invoice file
     try:
-        report_df = pd.read_csv(invoice_path + invoice_filename, dtype={'ctn': str})
+        #report_df = pd.read_csv(invoice_path + invoice_filename, dtype={'ctn': str})
+        report_df = pd.read_csv(invoice_path + invoice_filename)
     except:
         print "Invoice {} does not seem to exist! Skipping...".format(invoice_filename)
         return
@@ -643,12 +697,13 @@ def create_wl_report(supplier, invoice):
     report_df = report_df[['ctn','rental','gprs','gprs_usage','gprsroam',
                             'sms','sms_usage','smsroam','nettotal']]
 
-    print report_df['ctn'].dtype
-    print wl_sims_product_entity_df['ctn'].dtype
+    #Ensure CTN in both df's is the same dtype, just in case
+    report_df.ctn = report_df.ctn.astype('str')
+    wtf_to_call_this_df.ctn = wtf_to_call_this_df.ctn.astype('str')
 
     #Join the invoice(report_df) to wl_sims_product_entity_df
-    report_df = report_df.merge(wl_sims_product_entity_df, on="ctn", how="left")
-
+    report_df = report_df.merge(wtf_to_call_this_df, on="ctn", how="left")
+    
 
     #If entity field is blank, product must have been deleted from Smart Solar
     report_df = report_df.fillna(value = {'entity_id': 0, 'name': 'Product not in SmartSolar'})
@@ -667,7 +722,7 @@ def create_wl_report(supplier, invoice):
                                                         'name': 'entity_name',
                                                         'gprs': 'data',
                                                         'gprs_usage': 'data_usage'})
-  
+    #Itemised report
     report_df.to_csv(report_path+report_filename)
 
     return report_df
@@ -797,8 +852,8 @@ def create_aeris_report(supplier, invoice, report_df):
     #Add a column with total sms cost for each imsi
     report_df['sms']=report_df[['sms_mo','sms_mt']].sum(1)
 
-    #Create the grouped report
-    create_grouped_report(invoice, report_df, 'Aeris', 'GBP')
+    # #Create the grouped report
+    # create_grouped_report(invoice, 'Aeris', 'GBP')
 
     return report_df
 
@@ -939,11 +994,7 @@ def create_eseye_report(supplier, invoice, product_entity):
     #i.e. costs associated with SIMS that aren't on the SIM list returned by API
     #Assume for now that these are unassignable SMS costs as in April 18 invoice
     report_df = report_df.fillna(value = {'entity_name': 'non-entity cost', 'tariff_name': '9016'})
-
-
-    #Create the grouped report
-    create_grouped_report(invoice, report_df, 'Eseye', 'USD')
-    
+  
     return report_df
 
 
@@ -980,12 +1031,11 @@ if __name__ == '__main__':
 
         if supplier == 'WL' or supplier == 'Intelligent':
 
-
-            wl_sims_file = "WL_sims_plus_tariffs.csv"
+            wl_sims_file = "WL_sims_plus_tariffs.csv" #this file contains all WL SIMs, including Intelligent ones
 
             #Get complete list of SIMs + tariffs they are on
             if os.path.isfile(wl_sims_file):
-                update_sims_df = raw_input("Do you want to update the WL SIM list (Y)? (Warning: will take ages): ")
+                update_sims_df = raw_input("Do you want to update the WL SIM list (Y)? (Warning: will take several hours to run): ")
             else:
                 update_sims_df = "Y"
 
@@ -993,7 +1043,6 @@ if __name__ == '__main__':
 
                 #Get complete list of WL SIMs including the Intelligent SIMs
                 wl_sims_df = get_df_of_wl_sims()
-                #wl_sims_df = pd.read_csv("WL_sims.csv")
 
                 #Get tariff details
                 wl_sims_plus_tariffs_df = get_df_of_wl_tariffs()
@@ -1002,10 +1051,10 @@ if __name__ == '__main__':
                 wl_sims_plus_tariffs_df
             except NameError:
                 print "Reading SIM list from file..."
-                wl_sims_plus_tariffs_df = pd.read_csv(wl_sims_file, dtype={'imsi': str, 'msisdn': str})
+                wl_sims_plus_tariffs_df = pd.read_csv(wl_sims_file, dtype={"imsi": str, "msisdn": str})
 
             #This df will have all WL and Intelligent SIMs in it
-            wl_sims_product_entity_df = add_product_entity_and_ctn()
+            wtf_to_call_this_df = wl_add_product_entity_and_ctn(supplier)
             
 
             for invoice in invoice_list:
@@ -1043,13 +1092,18 @@ if __name__ == '__main__':
                     
                     #Can't get a list of SIMs from Aeris so have to get the invoice first
                     #and join on this. Different to WL and Eseye
+
+                    #This function returns the invoice, cleaned of stuff we don't want/need
                     AERIS_INVOICE_DF = process_aeris_invoice(supplier, invoice)
 
                     #Add the entities
                     AERIS_ENTITIES = join_invoice_to_product_entity(supplier, AERIS_INVOICE_DF)
                     
                     #Create the report
-                    create_aeris_report(supplier, invoice, AERIS_ENTITIES)
+                    report_df = create_aeris_report(supplier, invoice, AERIS_ENTITIES)
+
+                    #Create the grouped report
+                    create_grouped_report(invoice, supplier, 'GBP')
 
         if supplier == 'Eseye':
 
@@ -1102,4 +1156,7 @@ if __name__ == '__main__':
                     ESEYE_SIMS_PLUS_ENTITIES = join_invoice_to_product_entity(supplier, ESEYE_SIMS)
                     
                     #Create the report
-                    create_eseye_report(supplier, invoice, ESEYE_SIMS_PLUS_ENTITIES)
+                    report_df = create_eseye_report(supplier, invoice, ESEYE_SIMS_PLUS_ENTITIES)
+
+                    #Create the grouped report
+                    create_grouped_report(invoice, supplier, 'USD')
