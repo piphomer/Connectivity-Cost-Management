@@ -18,6 +18,8 @@ supplier_list = ['WL','Intelligent','Aeris', 'Eseye']
 # Setup some variable assignments
 ########################################################################
 
+TODAY = pd.to_datetime(dt.now())
+
 # WL & WL INTELLIGENT #
 
 WIRELESS_LOGIC_API_BASE = "https://simpro4.wirelesslogic.com/api/v3/"
@@ -60,85 +62,45 @@ def make_df(data):
 
 ########################################################################
 
-def get_entities():
-
+def get_tables():
     db = rep.ReplicaDatabase()
     # rep.download_table(db, 'product', save_json = True, debug = True)
     # rep.download_table(db, 'state', save_json=True, debug=True)
     # rep.download_table(db, 'entity', save_json=True, debug=True)
     # rep.download_table(db, 'product_entity_linker', save_json=True, debug=True)
+    # rep.download_table(db, 'state_type', save_json=True, debug=True)
 
-    print "Opening Products table..."
+    print "Opening Products table"
     with open('tables/product.json', 'rb') as rf:
         products_df = make_df(json.load(rf))
-        print products_df.shape[0], " products found in SmartSolar"
+        print products_df.shape[0], "products found in SmartSolar"
 
+    print "Opening States table"
+    with open('tables/state.json', 'rb') as rf:
+        states_df = make_df(json.load(rf))
+        states_df = states_df[['state_id','product_imei','current_state_type','created_at']]
+        states_df.created_at = pd.to_datetime(states_df.created_at)
+        states_df.product_imei = states_df.product_imei.astype('str')
+        #states_df.set_index('product_imei', inplace=True)
 
-    # with open('tables/state.json', 'rb') as rf:
-    #     states_df = make_df(json.load(rf))
-    # print "got states"
-
-    print "Opening Entities table..."
+    print "Opening Entities table"
     with open('tables/entity.json', 'rb') as rf:
         entities_df = make_df(json.load(rf))
-        #Just keep the entity_id and name
         entities_df = entities_df[['entity_id','name']]
+        entities_df.rename(index=str, columns = {'name': 'entity'}, inplace=True)
 
-    print "Opening Product/Entity Linker table..."
+    print "Opening Product/Entity Linker table"
     with open('tables/product_entity_linker.json', 'rb') as rf:
         pel_df = make_df(json.load(rf))
-        #Just take imei, entity id and date removed from the product_entity_linkers table
         pel_df = pel_df[['product_imei','entity_id','date_added','date_removed']]
 
+    print "Opening State Type table"
+    with open('tables/state_type.json', 'rb') as rf:
+        state_types_df = make_df(json.load(rf))
+        state_types_df = state_types_df[['state_type_id', 'name']]
+        state_types_df.rename(index=str, columns = {'name': 'state'},inplace=True)
 
-    #Join pel_df and entity_df
-    product_entity_df = pel_df.merge(entities_df, on='entity_id')
-
-    #only keep rows where date_removed is null (i.e. only keep current entity records)
-    product_entity_df = product_entity_df[product_entity_df.date_removed.isnull()]
- 
-    #Make the IMEI a string
-    product_entity_df.product_imei.astype('str')
-
-    #Change the index to IMEI so we can drop duplicate rows more easily
-    product_entity_df.set_index('product_imei', inplace=True)
-
-
-    print "Looking for IMEIs with multiple entities..."
-
-    for imei, group in product_entity_df.groupby('product_imei'):
-
-        if group.shape[0] > 1: #only look at imei's with more than one current entity
-
-            #print imei
-
-            #First, remove this IMEI from the dataframe entirely. We will then add back in only the row we deem relevant
-            product_entity_df = product_entity_df.drop(imei)
-
-            group = group[group['name'] != 'BBOXX Engineering'] #remove rows that are BBOXX Engineering
-            group = group[group['name'] != 'BBOXX Asia'] #remove rows that are BBOXX Asia 
-            group = group[group['name'] != 'Orange Energy All'] #remove rows that are Orange Energy All 
-            group = group[group['name'] != 'Aceleron'] #remove rows that are Aceleron
-            
-            if group.shape[0] > 1: #if there is STILL more than one IMEI on this entity...
-                group['date_added_copy'] = pd.to_datetime(group['date_added']) #add a column with a pandas datetime or it won't sort properly
-                group.sort_values(by='date_added_copy', ascending=False, inplace=True)
-                group = group.iloc[0] #just take the first (newest) one
-                group.drop(['date_added_copy'], inplace=True) #drop that added column
-
-            product_entity_df = product_entity_df.append(group) #Append the resulting one-row group back into the dataframe
-
-    print "One-to-one IMEI:entity mapping complete! There are now ", product_entity_df.shape[0], "products in the list."
-
-
-    #Join the Product table so we can get the IMSI and the ICCID
-    product_entity_df = product_entity_df.merge(products_df[['imsi','iccid','product_imei']], left_index=True, right_on='product_imei')
-
-    product_entity_df.set_index('product_imei', inplace=True)
-
-    product_entity_df.to_csv("product_entity.csv")
-
-    return product_entity_df
+    return products_df, states_df, entities_df, pel_df, state_types_df
 
 ########################################################################
 
@@ -229,7 +191,7 @@ def get_invoice_list(supplier):
 
         except: #if no internet connection exists, just look at already downloaded invoices
 
-            invoice_path = nake_invoice_path(supplier)
+            invoice_path = make_invoice_path(supplier)
 
             interim_list = [f for f in listdir(invoice_path) if isfile(join(invoice_path, f))]
 
@@ -1005,158 +967,187 @@ def create_eseye_report(supplier, invoice, product_entity):
 
 if __name__ == '__main__':
 
-    #Get the product_entity_df dataframe
-    q = raw_input('Load product_entity dataframe or generate new one? (L/l to load existing)')
+    #Make the list of months for which to create reports
+    date_list = pd.date_range('2014-01-01', TODAY, freq='MS').tolist()
 
-    if q == 'L' or q == 'l':
-        product_entity_df = pd.read_csv('product_entity.csv')
-    else:
-        product_entity_df = get_entities()
+    #Turn the list into a dataframe
+    dates_df = pd.DataFrame(date_list, columns=['start_date'])
 
+    #Make the end date of each month be the start date of the following month
+    dates_df['end_date'] = dates_df['start_date'].shift(-1)
 
-    #Workflow is different for each SIM provider
-
-    for supplier in supplier_list:
-
-        print "Working on " + supplier
-
-        # Get list of available invoices
-        print "Getting invoice list..."
-        invoice_list = get_invoice_list(supplier)
+    #We're not interested in this (i.e. current) month so just drop the last row. It doesn't have an end date anyway
+    dates_df = dates_df[:-1]
 
 
-        # Download any new invoices
-        get_new_invoices(invoice_list, supplier)
+    #Loop through all the months in the month list
+    for i, month in enumerate(dates_df.start_date):
 
+        print dt.strftime(month, '%y-%b')
 
-        if supplier == 'WL' or supplier == 'Intelligent':
-
-            wl_sims_file = "WL_sims_plus_tariffs.csv" #this file contains all WL SIMs, including Intelligent ones
-
-            #Get complete list of SIMs + tariffs they are on
-            if os.path.isfile(wl_sims_file):
-                update_sims_df = raw_input("Do you want to update the WL SIM list (Y)? (Warning: will take several hours to run): ")
-            else:
-                update_sims_df = "Y"
-
-            if update_sims_df == "Y" or update_sims_df == "y":
-
-                #Get complete list of WL SIMs including the Intelligent SIMs
-                wl_sims_df = get_df_of_wl_sims()
-
-                #Get tariff details
-                wl_sims_plus_tariffs_df = get_df_of_wl_tariffs()
-
-            try:
-                wl_sims_plus_tariffs_df
-            except NameError:
-                print "Reading SIM list from file..."
-                wl_sims_plus_tariffs_df = pd.read_csv(wl_sims_file, dtype={"imsi": str, "msisdn": str})
-
-            #This df will have all WL and Intelligent SIMs in it
-            wtf_to_call_this_df = wl_add_product_entity_and_ctn(supplier)
+        month_start = month
+        month_end = dates_df.end_date[i]
+        
+        #Get the product_entity_state_df dataframe for this month
+        pes_filename = "product_entity_state/{}_product_entity_state.csv".format(dt.strftime(month_start, '%y-%b'))
+        
+        if os.path.isfile(pes_filename):
+            product_entity_state_df = pd.read_csv(pes_filename)
+        else:
+            #Get the tables from SmartSolar
+            #But this is horribly inefficient, opening them for each month
+            #But but... this should not need to be done for more than one month per run anyway... two tops!
+            products_df, states_df, entities_df, pel_df, state_types_df = get_tables()
             
+            #Create a bespoke product_entity_state_df for this month
+            product_entity_state_df = make_product_entity_state_df(month_start, month_end)
 
-            for invoice in invoice_list:
+            product_entity_state_df.to_csv(pes_filename)
 
-                print "Invoice number: " + invoice['invref']
 
-                # Check if report already exists 
-                report_exists = check_reports(invoice, supplier)
-                
-                if report_exists:
-                    print "Report already exists for invoice " + invoice['invref']
+        #Workflow is different for each SIM provider
+
+        for supplier in supplier_list:
+
+            print "Working on " + supplier
+
+            # Get list of available invoices
+            print "Getting invoice list..."
+            invoice_list = get_invoice_list(supplier)
+
+
+            # Download any new invoices
+            get_new_invoices(invoice_list, supplier)
+
+
+            if supplier == 'WL' or supplier == 'Intelligent':
+
+                wl_sims_file = "WL_sims_plus_tariffs.csv" #this file contains all WL SIMs, including Intelligent ones
+
+                #Get complete list of SIMs + tariffs they are on
+                if os.path.isfile(wl_sims_file):
+                    update_sims_df = raw_input("Do you want to update the WL SIM list (Y)? (Warning: will take several hours to run): ")
                 else:
-                    print "Creating report for invoice " + invoice['invref']
+                    update_sims_df = "Y"
 
-                    #Create the full report
-                    report_df = create_wl_report(supplier, invoice)
+                if update_sims_df == "Y" or update_sims_df == "y":
 
-                    #Create the grouped report
-                    create_grouped_report(invoice, supplier, 'GBP')
+                    #Get complete list of WL SIMs including the Intelligent SIMs
+                    wl_sims_df = get_df_of_wl_sims()
 
+                    #Get tariff details
+                    wl_sims_plus_tariffs_df = get_df_of_wl_tariffs()
 
-        if supplier == 'Aeris':
+                try:
+                    wl_sims_plus_tariffs_df
+                except NameError:
+                    print "Reading SIM list from file..."
+                    wl_sims_plus_tariffs_df = pd.read_csv(wl_sims_file, dtype={"imsi": str, "msisdn": str})
+
+                #This df will have all WL and Intelligent SIMs in it
+                wtf_to_call_this_df = wl_add_product_entity_and_ctn(supplier)
                 
-            for invoice in invoice_list:
 
-                print "Invoice number: " + invoice['invref']
+                for invoice in invoice_list:
 
-                # Check if report already exists 
-                report_exists = check_reports(invoice, supplier)
-                
-                if report_exists:
-                    print "Report already exists for invoice " + invoice['invref']
+                    print "Invoice number: " + invoice['invref']
+
+                    # Check if report already exists 
+                    report_exists = check_reports(invoice, supplier)
+                    
+                    if report_exists:
+                        print "Report already exists for invoice " + invoice['invref']
+                    else:
+                        print "Creating report for invoice " + invoice['invref']
+
+                        #Create the full report
+                        report_df = create_wl_report(supplier, invoice)
+
+                        #Create the grouped report
+                        create_grouped_report(invoice, supplier, 'GBP')
+
+
+            if supplier == 'Aeris':
+                    
+                for invoice in invoice_list:
+
+                    print "Invoice number: " + invoice['invref']
+
+                    # Check if report already exists 
+                    report_exists = check_reports(invoice, supplier)
+                    
+                    if report_exists:
+                        print "Report already exists for invoice " + invoice['invref']
+                    else:
+                        print "Creating report for invoice " + invoice['invref']
+                        
+                        #Can't get a list of SIMs from Aeris so have to get the invoice first
+                        #and join on this. Different to WL and Eseye
+
+                        #This function returns the invoice, cleaned of stuff we don't want/need
+                        AERIS_INVOICE_DF = process_aeris_invoice(supplier, invoice)
+
+                        #Add the entities
+                        AERIS_ENTITIES = join_invoice_to_product_entity(supplier, AERIS_INVOICE_DF)
+                        
+                        #Create the report
+                        report_df = create_aeris_report(supplier, invoice, AERIS_ENTITIES)
+
+                        #Create the grouped report
+                        create_grouped_report(invoice, supplier, 'GBP')
+
+            if supplier == 'Eseye':
+
+                #Get a list of all provisioned SIMs
+                sim_file = "eseye_sims.csv"
+
+                if os.path.isfile(sim_file):
+                    update_sim_list = raw_input("Do you want to update the SIM list (Y)? (Warning: will take ages): ")
                 else:
-                    print "Creating report for invoice " + invoice['invref']
-                    
-                    #Can't get a list of SIMs from Aeris so have to get the invoice first
-                    #and join on this. Different to WL and Eseye
+                    update_sim_list = "Y"
 
-                    #This function returns the invoice, cleaned of stuff we don't want/need
-                    AERIS_INVOICE_DF = process_aeris_invoice(supplier, invoice)
+                if update_sim_list == "Y" or update_sim_list == "y":
 
-                    #Add the entities
-                    AERIS_ENTITIES = join_invoice_to_product_entity(supplier, AERIS_INVOICE_DF)
-                    
-                    #Create the report
-                    report_df = create_aeris_report(supplier, invoice, AERIS_ENTITIES)
+                    #Get complete list of Eseye SIMS
+                    ESEYE_SIMS = get_eseye_sims()
 
-                    #Create the grouped report
-                    create_grouped_report(invoice, supplier, 'GBP')
+                try:
+                    ESEYE_SIMS
+                except NameError:
+                    print "Reading SIM list from file..."
+                    ESEYE_SIMS = pd.read_csv(sim_file, index_col=0)
 
-        if supplier == 'Eseye':
-
-            #Get a list of all provisioned SIMs
-            sim_file = "eseye_sims.csv"
-
-            if os.path.isfile(sim_file):
-                update_sim_list = raw_input("Do you want to update the SIM list (Y)? (Warning: will take ages): ")
-            else:
-                update_sim_list = "Y"
-
-            if update_sim_list == "Y" or update_sim_list == "y":
-
-                #Get complete list of Eseye SIMS
-                ESEYE_SIMS = get_eseye_sims()
-
-            try:
-                ESEYE_SIMS
-            except NameError:
-                print "Reading SIM list from file..."
-                ESEYE_SIMS = pd.read_csv(sim_file, index_col=0)
-
-            #rename the iccid column
-            ESEYE_SIMS.rename(columns = {'ICCID': 'iccid'}, inplace=True)
-            
-            #All we really want from ESEYE_SIMS is the provisioned status
-            #Everything else we can get from the invoice.
-            #So, just keep that.
-            ESEYE_SIMS = ESEYE_SIMS[['iccid','status']]
-
-            print ESEYE_SIMS.head(20)
-
-
-            # Run through all invoices and see if a report has been made
-            # If not, make one
-         
-            for invoice in invoice_list:
-
-                print "Invoice number: " + invoice['invref']
-
-                # Check if report already exists 
-                report_exists = check_reports(invoice, supplier)
+                #rename the iccid column
+                ESEYE_SIMS.rename(columns = {'ICCID': 'iccid'}, inplace=True)
                 
-                if report_exists:
-                    print "Report already exists for invoice " + invoice['invref']
-                else:
-                    print "Creating report for invoice " + invoice['invref']
-                    
-                    # Attach the entities
-                    ESEYE_SIMS_PLUS_ENTITIES = join_invoice_to_product_entity(supplier, ESEYE_SIMS)
-                    
-                    #Create the report
-                    report_df = create_eseye_report(supplier, invoice, ESEYE_SIMS_PLUS_ENTITIES)
+                #All we really want from ESEYE_SIMS is the provisioned status
+                #Everything else we can get from the invoice.
+                #So, just keep that.
+                ESEYE_SIMS = ESEYE_SIMS[['iccid','status']]
 
-                    #Create the grouped report
-                    create_grouped_report(invoice, supplier, 'USD')
+                print ESEYE_SIMS.head(20)
+
+
+                # Run through all invoices and see if a report has been made
+                # If not, make one
+             
+                for invoice in invoice_list:
+
+                    print "Invoice number: " + invoice['invref']
+
+                    # Check if report already exists 
+                    report_exists = check_reports(invoice, supplier)
+                    
+                    if report_exists:
+                        print "Report already exists for invoice " + invoice['invref']
+                    else:
+                        print "Creating report for invoice " + invoice['invref']
+                        
+                        # Attach the entities
+                        ESEYE_SIMS_PLUS_ENTITIES = join_invoice_to_product_entity(supplier, ESEYE_SIMS)
+                        
+                        #Create the report
+                        report_df = create_eseye_report(supplier, invoice, ESEYE_SIMS_PLUS_ENTITIES)
+
+                        #Create the grouped report
+                        create_grouped_report(invoice, supplier, 'USD')
