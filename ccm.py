@@ -105,7 +105,9 @@ def get_tables():
 ########################################################################
 
 def make_invoice_path(supplier):
-    invoice_path = './invoices/{}/csv/'.format(supplier)
+    #invoice_path = './invoices/{}/csv/'.format(supplier)
+
+    invoice_path = 'invoices/{}/csv/'.format(supplier)
     return invoice_path
 
 def make_invoice_filename(invoice):
@@ -1011,10 +1013,33 @@ if __name__ == '__main__':
 
             print "Working on " + supplier
 
-            # Get list of available invoices
-            print "Getting invoice list..."
-            invoice_list = get_invoice_list(supplier)
+            # #Get list of available invoices
+            # #print "Getting invoice list..."
+            # #invoice_list = get_invoice_list(supplier)
 
+            # invoice_fname prototype:
+            #      201701_invoice_Aeris.csv
+            #      201802_invoice_WL.csv
+            #      etc
+
+            invoice_path = make_invoice_path(supplier)
+            invoice_fname = "{}_invoice_{}.csv".format(dt.strftime(month, '%Y%m'),supplier)
+
+            print os.path.join(invoice_path,invoice_fname)
+
+            #Get invoice for this month
+            if supplier == 'WL' or supplier == 'Intelligent':
+
+                if os.path.isfile(os.path.join(invoice_path,invoice_fname)):
+                    invoice_df = pd.read_csv(os.path.join(invoice_path,invoice_fname))
+                else:
+                    print "Didn't work"
+
+            else:
+                print "2"
+
+            print invoice_df.head(10)
+            raw_input("?")
 
             # Download any new invoices
             get_new_invoices(invoice_list, supplier)
