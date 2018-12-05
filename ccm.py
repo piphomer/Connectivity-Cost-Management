@@ -105,9 +105,7 @@ def get_tables():
 ########################################################################
 
 def make_invoice_path(supplier):
-    #invoice_path = './invoices/{}/csv/'.format(supplier)
-
-    invoice_path = 'invoices/{}/csv/'.format(supplier)
+    invoice_path = './invoices/{}/csv/'.format(supplier)
     return invoice_path
 
 def make_invoice_filename(invoice):
@@ -149,6 +147,73 @@ def make_grouped_report_filename(month, supplier):
     
     return grouped_report_filename
 
+
+
+def download_new_invoices(supplier):
+
+    if supplier == 'WL' or supplier == 'Intelligent':
+        #Get list of all available invoices
+        if supplier == 'WL':
+            URL = WIRELESS_LOGIC_API_BASE + "invoices?_format=json&billing-account=" + BBOXX_ACCOUNT_WL
+        else:
+            URL = WIRELESS_LOGIC_API_BASE + "invoices?_format=json&billing-account=" + BBOXX_ACCOUNT_INTELLIGENT
+
+        try: #if internet connection exists
+
+            r = requests.get(url=URL, auth=AUTH)
+
+            print r.status_code
+
+            if r.status_code == 200:
+                print "Invoice list succesfully downloaded."
+            else:
+                print "Need to add an error handler!"
+                return
+
+            r_json = r.json()
+
+            invoice_list = []
+
+            for invoice in r_json:
+                
+                #invref = invoice['invref'].replace("/","-") + ".csv"
+                invref = invoice['invref'].replace("/","-")
+                invdate = invoice['date'].replace("-","")
+
+                invdict = {'invref': invref, 'date' : invdate}
+                invoice_list.append(invdict)
+            
+            print invoice_list
+            return invoice_list
+
+        except: #if no internet connection exists, just look at already downloaded invoices
+
+            invoice_path = make_invoice_path(supplier)
+
+            interim_list = [f for f in listdir(invoice_path) if isfile(join(invoice_path, f))]
+
+            invoice_list = []
+
+            for invoice in interim_list:
+
+                #split the invoice file name into date and reference number
+                invdate, invref = invoice.split("_")
+
+                #Not needed for WL right now but maybe I will generalise this function later
+                invref = invref.replace(".csv","")
+                        
+                invdict = {'invref': invref, 'date' : invdate}
+                invoice_list.append(invdict)
+
+            return invoice_list
+        #Check which ones are not already downloaded
+
+        #Download new ones
+
+    if supplier == 'Aeris' or supplier == 'Eseye':
+        print "{} invoices have to be downloaded manually for now."
+
+    return
 
 ####################################################################################################
 
@@ -969,6 +1034,13 @@ def create_eseye_report(supplier, invoice, product_entity):
 
 if __name__ == '__main__':
 
+    #Check for new invoices via the suppliers' APIs
+    for supplier in supplier_list:
+
+        print "Looking for new invoices from " + supplier
+
+        download_new_invoices(supplier)
+
     #Make the list of months for which to create reports
     date_list = pd.date_range('2014-01-01', TODAY, freq='MS').tolist()
 
@@ -1025,7 +1097,7 @@ if __name__ == '__main__':
             invoice_path = make_invoice_path(supplier)
             invoice_fname = "{}_invoice_{}.csv".format(dt.strftime(month, '%Y%m'),supplier)
 
-            print os.path.join(invoice_path,invoice_fname)
+            #print os.path.join(invoice_path,invoice_fname)
 
             #Get invoice for this month
             if supplier == 'WL' or supplier == 'Intelligent':
@@ -1033,7 +1105,7 @@ if __name__ == '__main__':
                 if os.path.isfile(os.path.join(invoice_path,invoice_fname)):
                     invoice_df = pd.read_csv(os.path.join(invoice_path,invoice_fname))
                 else:
-                    print "Didn't work"
+                    print "Invoice does not exist for this month for {}".format(supplier)
 
             else:
                 print "2"
