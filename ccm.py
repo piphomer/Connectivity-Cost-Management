@@ -400,11 +400,11 @@ def create_grouped_report(month, supplier, currency = 'GBP'):
 
 def create_wl_report(supplier, month):
 
-    invoice_filename = "{}_invoice_{}.csv".format(dt.strftime(month, '%Y%m'),supplier)
     invoice_path = make_invoice_path(supplier)
+    invoice_filename = "{}_invoice_{}.csv".format(dt.strftime(month, '%Y%m'),supplier)
 
+    report_path = './Itemised Reports/{}/'.format(supplier)
     report_filename = make_report_filename(month, supplier)
-    report_path = './Full Reports/{}/'.format(supplier)
 
     #Read the invoice file
     try:
@@ -436,8 +436,13 @@ def create_wl_report(supplier, month):
     print report_df.head(3)
 
 
-    #If entity field is blank, product must have been deleted from Smart Solar
-    report_df = report_df.fillna(value = {'entity_id': 0, 'entity': 'Product not in SmartSolar', 'state': 'N/A'})
+    #If entity field is blank and SIM is WL, assume product must have been deleted from Smart Solar
+    #If entity field is blank and SIM is Intelligent, assume it is a spare part not yet created in SS
+    if supplier == 'WL':
+        report_df = report_df.fillna(value = {'entity_id': 0, 'entity': 'Product not in SmartSolar', 'state': '<deleted>'})
+    elif supplier == 'Intelligent':
+        report_df = report_df.fillna(value = {'entity_id': 0, 'entity': 'Unassigned spare part', 'state': '<spare_part>'})
+
 
     print report_df.head(3)
 
@@ -453,11 +458,113 @@ def create_wl_report(supplier, month):
                                                         'gprs_usage': 'data_usage',
                                                         'tariff_name': 'tariff'})
     
-    #Itemised report
+    #Save itemised report
     report_df.to_csv(report_path+report_filename)
 
     return report_df
 
+def create_aeris_report(supplier, month):
+    
+    invoice_path = make_invoice_path(supplier)
+    invoice_filename = "{}_invoice_{}.csv".format(dt.strftime(month, '%Y%m'),supplier)   
+    
+    report_path = './Itemised Reports/{}/'.format(supplier)
+    report_filename = make_report_filename(month, supplier)
+    
+    #Read the invoice file
+    report_df = pd.read_csv(invoice_path + invoice_filename, dtype={'IMSI': str, 'ICCID': str, 'POOL NAME': str, 'RATE PLAN NAME': str})
+
+    # Just keep the columns we're interested in
+    report_df = report_df[['IMSI',
+                            'ICCID',
+                            'TOTAL DEVICE CHARGES',
+                            'TOTAL MONTHLY CHARGES',
+                            'BILL TOTAL TRAFFIC CHARGES',
+                            'RATE PLAN NAME',
+                            'HOME ZONE',
+                            'ZONE_NAME',
+                            'POOL NAME',
+                            'BILL STATUS',
+                            'BILL SMS MT MSGS',
+                            'BILL SMS MO MSGS',
+                            'BILL SMS MT TRAFFIC CHARGES',
+                            'BILL SMS MO TRAFFIC CHARGES',
+                            'BILL PKT KB',]]
+
+
+    #lower case some columns
+    report_df.rename(columns = {'ICCID': 'iccid', 'IMSI':'imsi', 'RATE PLAN NAME':'tariff'}, inplace=True)
+
+
+    #Drop any rows where 'BILL STATUS' is 'PROV'
+    report_df = report_df[report_df['BILL STATUS'] != 'PROV']
+
+    #Drop any rows where 'RATE PLAN NAME' is '90DAYSTRIAL_GLOBAL_10MB' or '90DAYSTRIAL_GLOBAL'
+    report_df = report_df[report_df['tariff'] != '90DAYSTRIAL_GLOBAL_10MB']
+    report_df = report_df[report_df['tariff'] != '90DAYSTRIAL_GLOBAL']
+
+    #Get rid of any extraneous punctuation in the invoice data (e.g. =")
+    def strip_extraneous(report_df):
+        report_df['iccid'] = re.findall("\d+", report_df['iccid'])[0] #re.findall returns a list, \d+ matches one or more digits
+        report_df['imsi'] = re.findall("\d+", report_df['imsi'])[0]
+        report_df['tariff'] = report_df['tariff'].strip("=")
+        report_df['tariff'] = report_df['tariff'].strip("\"")
+        report_df['POOL NAME'] = report_df['POOL NAME'].strip("=")
+        report_df['POOL NAME'] = report_df['POOL NAME'].strip("\"")
+        return report_df
+
+    report_df = report_df.apply(strip_extraneous, axis=1)
+        
+    #Merge with product_entity_state dataframe
+    report_df = report_df.merge(product_entity_state_df, on='imsi', how='left')
+
+
+    #If entity field is blank, SIM has likely been provisioned but not put in a product yet
+    report_df = report_df.fillna(value = {'entity_id': 0, 'entity': 'Unassigned spare part', 'state': '<spare_part>'})
+    
+    #Just pull the fields we are interested in
+    report_df = report_df.drop(['entity_id','date_added','date_removed','iccid_y',
+                                'state_type_id','state_id','current_state_type','created_at'], axis=1)
+    
+    #lower case the ICCID column
+    report_df.rename(columns = {'iccid_x': 'iccid'}, inplace=True)
+
+    #Group by ItemRef, to consolidate multiple items of same type
+    report_df = report_df.groupby(['imsi'], axis = 0).agg({'iccid': 'first',
+                                                            'TOTAL MONTHLY CHARGES': sum,
+                                                            'TOTAL DEVICE CHARGES': sum,
+                                                            'BILL TOTAL TRAFFIC CHARGES': sum,
+                                                            'tariff': 'first',
+                                                            'HOME ZONE': 'first',
+                                                            'ZONE_NAME': 'first',
+                                                            'POOL NAME': 'first',
+                                                            'BILL STATUS': 'first',
+                                                            'BILL SMS MT MSGS': sum,
+                                                            'BILL SMS MO MSGS': sum,
+                                                            'BILL SMS MT TRAFFIC CHARGES': sum,
+                                                            'BILL SMS MO TRAFFIC CHARGES': sum,
+                                                            'BILL PKT KB': sum,
+                                                            'product_imei': 'first',
+                                                            'entity': 'first',
+                                                            'state': 'first'})
+
+    report_df = report_df.reset_index()
+
+    #Rename some columns
+    report_df = report_df.rename(index=str,
+                        columns={'TOTAL DEVICE CHARGES': 'total',
+                                'TOTAL MONTHLY CHARGES': 'rental',
+                                'BILL SMS MO TRAFFIC CHARGES': 'sms_mo',
+                                'BILL SMS MT TRAFFIC CHARGES': 'sms_mt',
+                                'BILL TOTAL TRAFFIC CHARGES': 'data'})
+
+    #Add a column with total sms cost for each imsi
+    report_df['sms']=report_df[['sms_mo','sms_mt']].sum(1)
+
+    #Save itemised report
+    report_df.to_csv(report_path+report_filename)
+
+    return report_df
 
 def create_eseye_report(supplier, month):
 
@@ -465,7 +572,7 @@ def create_eseye_report(supplier, month):
     invoice_path = make_invoice_path(supplier)
 
     report_filename = make_report_filename(month, supplier)
-    report_path = './Full Reports/{}/'.format(supplier)
+    report_path = './Itemised Reports/{}/'.format(supplier)
     
     report_df = pd.read_csv(invoice_path + invoice_filename, dtype={'ICCID': str}, skiprows=[0], index_col=False)
 
@@ -491,7 +598,7 @@ def create_eseye_report(supplier, month):
                                                                 'entity','product_imei','state']]
 
     #If entity field is blank, SIM has likely been provisioned but not put in a product yet
-    report_df = report_df.fillna(value = {'entity_id': 0, 'entity': 'Product not in SmartSolar', 'state': 'N/A'})
+    report_df = report_df.fillna(value = {'entity_id': 0, 'entity': 'Unassigned spare part', 'state': '<spare_part>'})
 
     #Group by ItemRef, to consolidate multiple items of same type
     report_df = report_df.groupby(['ItemRef','iccid'], axis = 0).agg({'tariff': 'first',
@@ -539,8 +646,11 @@ def create_eseye_report(supplier, month):
     #Any rows that don't have an entity assigned at this point must be non-SIM invoice items
     #i.e. costs associated with SIMS that aren't on the SIM list returned by API
     #Assume for now that these are unassignable SMS costs as in April 18 invoice
-    report_df = report_df.fillna(value = {'entity': 'SMS costs', 'tariff': 'SMS', 'state': 'N/A'})
+    report_df = report_df.fillna(value = {'entity': 'SMS costs', 'tariff': 'SMS', 'state': '<sms>'})
   
+    #Save itemised report
+    report_df.to_csv(report_path+report_filename)
+
     return report_df
 
 ####################################################################################################
@@ -641,8 +751,6 @@ def update_sim_list(supplier):
                 #Turn the list into a dataframe
                 wl_tariffs_df = make_df(wl_tariffs_list)
 
-                print wl_tariffs_df.head()
-
                 #Name the columns
                 wl_tariffs_df.columns = ['iccid','tariff_name','mno_account']
 
@@ -692,6 +800,10 @@ def update_sim_list(supplier):
         pass
 
     elif supplier == 'Eseye':
+
+        #The resulting file isn't even used in this script as the Eseye invoices already hold the tariff
+        #hey are being charged on (super useful actually). But good to refresh this occasionally to make
+        #sure SIMs are on the right tariff.
 
         eseye_sims_file = "eseye_sims.csv"
 
@@ -835,6 +947,18 @@ if __name__ == '__main__':
                     else:
                         print "No {} invoice exists for this month.".format(supplier)
 
+                elif supplier == 'Aeris':
+                    
+                    if os.path.isfile(os.path.join(invoice_path,invoice_fname)):
+
+                        #Create the full report
+                        report_df = create_aeris_report(supplier, month)
+
+                        #Create the grouped report
+                        create_grouped_report(month,supplier,'GBP')
+
+                    else:
+                        print "No {} invoice exists for this month.".format(supplier)
 
                 elif supplier == 'Eseye':
 
@@ -848,90 +972,3 @@ if __name__ == '__main__':
 
                     else:
                         print "No {} invoice exists for this month.".format(supplier)
-
-
-
-            # if supplier == 'Aeris':
-                    
-            #     for invoice in invoice_list:
-
-            #         print "Invoice number: " + invoice['invref']
-
-            #         # Check if report already exists 
-            #         report_exists = check_reports(invoice, supplier)
-                    
-            #         if report_exists:
-            #             print "Report already exists for invoice " + invoice['invref']
-            #         else:
-            #             print "Creating report for invoice " + invoice['invref']
-                        
-            #             #Can't get a list of SIMs from Aeris so have to get the invoice first
-            #             #and join on this. Different to WL and Eseye
-
-            #             #This function returns the invoice, cleaned of stuff we don't want/need
-            #             AERIS_INVOICE_DF = process_aeris_invoice(supplier, invoice)
-
-            #             #Add the entities
-            #             AERIS_ENTITIES = join_invoice_to_product_entity(supplier, AERIS_INVOICE_DF)
-                        
-            #             #Create the report
-            #             report_df = create_aeris_report(supplier, invoice, AERIS_ENTITIES)
-
-            #             #Create the grouped report
-            #             create_grouped_report(invoice, supplier, 'GBP')
-
-            # if supplier == 'Eseye':
-
-            #     #Get a list of all provisioned SIMs
-            #     sim_file = "eseye_sims.csv"
-
-            #     if os.path.isfile(sim_file):
-            #         update_sim_list = raw_input("Do you want to update the SIM list (Y)? (Warning: will take ages): ")
-            #     else:
-            #         update_sim_list = "Y"
-
-            #     if update_sim_list == "Y" or update_sim_list == "y":
-
-            #         #Get complete list of Eseye SIMS
-            #         ESEYE_SIMS = get_eseye_sims()
-
-            #     try:
-            #         ESEYE_SIMS
-            #     except NameError:
-            #         print "Reading SIM list from file..."
-            #         ESEYE_SIMS = pd.read_csv(sim_file, index_col=0)
-
-            #     #rename the iccid column
-            #     ESEYE_SIMS.rename(columns = {'ICCID': 'iccid'}, inplace=True)
-                
-            #     #All we really want from ESEYE_SIMS is the provisioned status
-            #     #Everything else we can get from the invoice.
-            #     #So, just keep that.
-            #     ESEYE_SIMS = ESEYE_SIMS[['iccid','status']]
-
-            #     print ESEYE_SIMS.head(20)
-
-
-            #     # Run through all invoices and see if a report has been made
-            #     # If not, make one
-             
-            #     for invoice in invoice_list:
-
-            #         print "Invoice number: " + invoice['invref']
-
-            #         # Check if report already exists 
-            #         report_exists = check_reports(invoice, supplier)
-                    
-            #         if report_exists:
-            #             print "Report already exists for invoice " + invoice['invref']
-            #         else:
-            #             print "Creating report for invoice " + invoice['invref']
-                        
-            #             # Attach the entities
-            #             ESEYE_SIMS_PLUS_ENTITIES = join_invoice_to_product_entity(supplier, ESEYE_SIMS)
-                        
-            #             #Create the report
-            #             report_df = create_eseye_report(supplier, invoice, ESEYE_SIMS_PLUS_ENTITIES)
-
-            #             #Create the grouped report
-            #             create_grouped_report(invoice, supplier, 'USD')
