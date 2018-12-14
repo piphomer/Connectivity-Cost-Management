@@ -356,8 +356,6 @@ def create_grouped_report(month, supplier, currency = 'GBP'):
 
     #Group the results by entity
     grouped_df = report_df[['entity','state','tariff','rental','data','sms','total']]
-    print grouped_df.head(50)
-    # print grouped_df['total'].sum()
 
     grouped_df = grouped_df.groupby(['entity','state','tariff'], \
                     axis = 0).agg({'rental': 'sum','data': 'sum','sms': 'sum','total' : ['sum', 'count']})
@@ -458,6 +456,91 @@ def create_wl_report(supplier, month):
     #Itemised report
     report_df.to_csv(report_path+report_filename)
 
+    return report_df
+
+
+def create_eseye_report(supplier, month):
+
+    invoice_filename = "{}_invoice_{}.csv".format(dt.strftime(month, '%Y%m'),supplier)
+    invoice_path = make_invoice_path(supplier)
+
+    report_filename = make_report_filename(month, supplier)
+    report_path = './Full Reports/{}/'.format(supplier)
+    
+    report_df = pd.read_csv(invoice_path + invoice_filename, dtype={'ICCID': str}, skiprows=[0], index_col=False)
+
+    # Just keep the columns we're interested in
+    report_df = report_df[['ItemRef','ICCID','PackageID','Quantity','Currency','Rate','Amount']]
+
+    #lower case the ICCID column
+    report_df.rename(columns = {'ICCID': 'iccid', 'PackageID': 'tariff'}, inplace=True)
+
+    #strip any '' off certain fields
+    def strip_apostrophe(report_df):
+        report_df['iccid'] = report_df['iccid'].strip("'")
+        report_df['tariff'] = report_df['tariff'].strip("'")
+        return report_df
+
+    report_df = report_df.apply(strip_apostrophe, axis=1)
+
+    # Add the entity information from the product_entity_state dataframe
+    report_df = report_df.merge(product_entity_state_df, on="iccid", how="left")
+
+    #Just keep the columns we're interested in
+    report_df = report_df[['ItemRef','iccid','tariff','Quantity','Currency','Rate','Amount',
+                                                                'entity','product_imei','state']]
+
+    #If entity field is blank, SIM has likely been provisioned but not put in a product yet
+    report_df = report_df.fillna(value = {'entity_id': 0, 'entity': 'Product not in SmartSolar', 'state': 'N/A'})
+
+    #Group by ItemRef, to consolidate multiple items of same type
+    report_df = report_df.groupby(['ItemRef','iccid'], axis = 0).agg({'tariff': 'first',
+                                                                        'Quantity': sum,
+                                                                        'Currency': 'first',
+                                                                        'Rate': sum,
+                                                                        'Amount': sum,
+                                                                        'entity': 'first',
+                                                                        'product_imei': 'first',
+                                                                        'state': 'first'})
+    
+    report_df = report_df.reset_index()
+
+    #Create a new dataframe with only SMS costs
+    apismsmt_df = report_df[report_df.ItemRef == 'APISMSMT'][['iccid','Amount','Quantity','Rate']]
+    sms_df = report_df[report_df.ItemRef == 'SMS'][['iccid','Amount','Quantity','Rate']]
+    
+    apismsmt_df.rename(columns={'Amount': 'apismsmt','Quantity':'APISMSMTQuantity','Rate':'APISMSMTRate'}, inplace=True)
+    sms_df.rename(columns={'Amount': 'sms','Quantity':'SMSQuantity','Rate':'SMSRate'}, inplace=True)
+    
+    sms_df = sms_df.merge(apismsmt_df, how='outer', on='iccid')
+    sms_df['sms'] = sms_df[['sms','apismsmt']].sum(1)
+    sms_df['SMSQuantity'] = sms_df[['SMSQuantity','APISMSMTQuantity']].sum(1)
+    sms_df['SMSRate'] = sms_df[['SMSRate','APISMSMTRate']].sum(1)
+
+
+    #Create a new dataframe with only data costs
+    data_df = report_df[report_df.ItemRef == 'Data'][['iccid','Amount','Quantity','Rate']]
+    data_df.rename(columns={'Amount': 'data','Quantity':'DataQuantity','Rate':'DataRate'}, inplace=True)
+
+    #Create a new dataframe with only service (rental) costs
+    service_df = report_df[report_df.ItemRef == 'Service']
+    service_df.rename(columns={'Amount': 'rental','Quantity':'ServiceQuantity','Rate':'ServiceRate'}, inplace=True)
+
+    #Merge all the dataframes
+    report_df = service_df.merge(data_df, how='outer', on='iccid')
+    report_df = report_df.merge(sms_df, how='outer', on='iccid')
+
+    #Add a column with total cost for each iccid
+    report_df['total']=report_df[['sms','data','rental']].sum(1)
+
+    #Rename a couple of columns
+    report_df = report_df.rename(index=str,columns={'ServiceAmount': 'rental'})
+
+    #Any rows that don't have an entity assigned at this point must be non-SIM invoice items
+    #i.e. costs associated with SIMS that aren't on the SIM list returned by API
+    #Assume for now that these are unassignable SMS costs as in April 18 invoice
+    report_df = report_df.fillna(value = {'entity': 'SMS costs', 'tariff': 'SMS', 'state': 'N/A'})
+  
     return report_df
 
 ####################################################################################################
@@ -693,7 +776,10 @@ if __name__ == '__main__':
     #Loop through all the months in the month list
     for i, month in enumerate(dates_df.start_date):
 
+        print "*******************************"
         print dt.strftime(month, '%y-%b')
+        print "*******************************"
+        print
 
         month_start = month
         month_end = dates_df.end_date[i]
@@ -725,23 +811,20 @@ if __name__ == '__main__':
             invoice_path = make_invoice_path(supplier)
             invoice_fname = "{}_invoice_{}.csv".format(dt.strftime(month, '%Y%m'),supplier)
 
+            # Check if report already exists 
+            report_exists = check_report_exists(month, supplier)
             
-            #Get invoice for this month
-            if supplier == 'WL' or supplier == 'Intelligent':
+            if report_exists:
+                print "Report already exists for this month for {}.".format(supplier)
 
-                # Check if report already exists 
-                report_exists = check_report_exists(month, supplier)
-                    
-                if report_exists:
-                    print "Report already exists for this month"
-
-                else:
-                    print "Creating report for this month"
-
+            else:
+                
+                print "Creating report for this month for {}".format(supplier)
+            
+                #Get invoice for this month
+                if supplier == 'WL' or supplier == 'Intelligent':
+            
                     if os.path.isfile(os.path.join(invoice_path,invoice_fname)):
-
-                        # print "Opening {} invoice".format(supplier)
-                        # invoice_df = pd.read_csv(invoice_path + invoice_fname)
 
                         #Create the full report
                         report_df = create_wl_report(supplier, month)
@@ -750,11 +833,21 @@ if __name__ == '__main__':
                         create_grouped_report(month, supplier, 'GBP')
 
                     else:
-                        print "{} invoice does not exist for this month.".format(supplier)
+                        print "No {} invoice exists for this month.".format(supplier)
 
 
+                elif supplier == 'Eseye':
 
+                    if os.path.isfile(os.path.join(invoice_path,invoice_fname)):
 
+                        #Create the full report
+                        report_df = create_eseye_report(supplier, month)
+
+                        #Create the grouped report
+                        create_grouped_report(month, supplier, 'USD')
+
+                    else:
+                        print "No {} invoice exists for this month.".format(supplier)
 
 
 
