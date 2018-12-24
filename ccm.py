@@ -12,7 +12,8 @@ import datetime
 
 import ccm_replica as rep
 
-supplier_list = ['WL','Intelligent','Aeris', 'Eseye']
+supplier_list = ['WL','Intelligent','Aeris', 'Eseye', 'VF']
+#supplier_list = ['VF']
 
 
 ########################################################################
@@ -85,6 +86,7 @@ def get_tables():
     # rep.download_table(db, 'entity', save_json=True, debug=True)
     # rep.download_table(db, 'product_entity_linker', save_json=True, debug=True)
     # rep.download_table(db, 'state_type', save_json=True, debug=True)
+    # rep.download_table(db, 'product_type', save_json=True, debug=True)
 
     print "Opening Products table"
     with open('tables/product.json', 'rb') as rf:
@@ -116,7 +118,14 @@ def get_tables():
         state_types_df = state_types_df[['state_type_id', 'name']]
         state_types_df.rename(index=str, columns = {'name': 'state'},inplace=True)
 
-    return products_df, states_df, entities_df, pel_df, state_types_df
+    print "Opening Product Type table"
+    with open('tables/product_type.json', 'rb') as rf:
+        product_types_df = make_df(json.load(rf))
+        product_types_df = product_types_df[['product_type_id', 'name']]
+        product_types_df.rename(columns = {'name': 'product'}, inplace=True)
+
+    return products_df, states_df, entities_df, pel_df, state_types_df, product_types_df
+
 
 def make_product_entity_state_df(month_start, month_end):
 
@@ -174,12 +183,12 @@ def make_product_entity_state_df(month_start, month_end):
 
     print "One-to-one IMEI:entity mapping complete! There are now ", product_entity_state_df.shape[0], "products in the list."
 
-    print product_entity_state_df.head(5)
-
     print "Merging with the Products table"
     #Join the Product table so we can get the IMSI and the ICCID
-    product_entity_state_df = product_entity_state_df.merge(products_df[['imsi','iccid','product_imei']], left_index=True, right_on='product_imei')
+    product_entity_state_df = product_entity_state_df.merge(products_df[['imsi','iccid','product_imei', 'product_type_id']], left_index=True, right_on='product_imei')
 
+    #Join the Product Types table
+    product_entity_state_df = product_entity_state_df.merge(product_types_df, on='product_type_id', how='left')
 
 
     #Discard any states that happened after the month of interest
@@ -187,7 +196,6 @@ def make_product_entity_state_df(month_start, month_end):
 
     print "Length of states table after removing states created after this month: ", states_filtered_df.shape[0]
 
-    # print states_filtered_df.head(10)
 
     #Only keep the latest state for each product, that should be the state at month end.
     
@@ -212,6 +220,10 @@ def make_product_entity_state_df(month_start, month_end):
     product_entity_state_df = product_entity_state_df.reset_index().merge(state_types_df, \
                                     how = 'left', left_on = 'current_state_type', right_on = 'state_type_id').set_index('product_imei')
 
+    #Drop unneeded columns
+    product_entity_state_df.drop(['entity_id','date_added','date_removed','product_type_id',
+                                            'current_state_type','created_at','state_id', 'state_type_id',],axis=1, inplace=True)
+
     print "product_entity_state_df looks like:"
     print product_entity_state_df.head(5)
 
@@ -224,8 +236,7 @@ def make_invoice_path(supplier):
     return invoice_path
 
 def make_invoice_filename(invoice,supplier):
-    #invoice_filename = invoice['date'] + "_" + invoice['invref'] + ".csv"
-
+    
     invdate = dt.date(dt.strptime(invoice['date'], '%Y%m%d')).replace(day = 1)
     invdate = invdate - datetime.timedelta(days = 1)
 
@@ -236,14 +247,6 @@ def make_invoice_filename(invoice,supplier):
 ########################################################################
 
 def make_report_filename(month, supplier):
-
-    # print invoice
-    # #Create a datetime object from the date value of the invoice
-    # try:
-    #     dateobject = dt.strptime(invoice['date'], "%Y%m")
-    # except:
-    #     dateobject = dt.strptime(invoice['date'], "%Y%m%d")
-    
 
     #Generate a nicer date string to name the report by
     report_filename = dt.strftime(month, "%Y-%m (%b)") + " " + supplier + " Cost Report.csv"
@@ -332,7 +335,7 @@ def download_new_invoices(supplier):
                 r_json.to_csv(invoice_path + invoice_filename)
 
 
-    if supplier == 'Aeris' or supplier == 'Eseye':
+    if supplier == 'Aeris' or supplier == 'Eseye' or supplier == 'VF':
         print "{} invoices have to be downloaded manually for now.".format(supplier)
 
     return
@@ -355,9 +358,9 @@ def create_grouped_report(month, supplier, currency = 'GBP'):
     grouped_report_filename = make_grouped_report_filename(month, supplier)
 
     #Group the results by entity
-    grouped_df = report_df[['entity','state','tariff','rental','data','sms','total']]
+    grouped_df = report_df[['entity','product','state','tariff','rental','data','sms','total']]
 
-    grouped_df = grouped_df.groupby(['entity','state','tariff'], \
+    grouped_df = grouped_df.groupby(['entity','product','state','tariff'], \
                     axis = 0).agg({'rental': 'sum','data': 'sum','sms': 'sum','total' : ['sum', 'count']})
 
     #Flatten the column indexes
@@ -365,7 +368,7 @@ def create_grouped_report(month, supplier, currency = 'GBP'):
     grouped_df.columns = [' '.join(col).strip() for col in grouped_df.columns.values]
 
     #Rearrange the columns
-    grouped_df = grouped_df[['entity','state','tariff','total count','rental sum','sms sum','data sum','total sum']]
+    grouped_df = grouped_df[['entity','product','state','tariff','total count','rental sum','sms sum','data sum','total sum']]
 
     #Rename the columns
     grouped_df = grouped_df.rename(index=str, columns={'total count': 'count',
@@ -375,27 +378,22 @@ def create_grouped_report(month, supplier, currency = 'GBP'):
                                                         'total sum': 'total'})
 
     #Add a column with the invoice month to filter on in Power BI
-    report_month = dt.strftime(month, "%m-%Y")
-
+    grouped_df['month'] = dt.strftime(month, "%m-%Y")
     
-    grouped_df['month'] = report_month
+    grouped_df['supplier'] = supplier               #Add a column showing the supplier
 
-    #Add a column showing the supplier
-    grouped_df['supplier'] = supplier
+    grouped_df['currency'] = currency               #Add a column showing the currency
 
-    #Add a column showing that WL costs are in USD
-    grouped_df['currency'] = currency
-    
-    #Set the index column
-    grouped_df.set_index('entity', inplace=True)
+    grouped_df.set_index('entity', inplace=True)    #Set the entity as the index column
 
     #Rearrange the columns of the grouped report
-    grouped_df = grouped_df[['supplier','state','tariff','count','rental','sms','data','total','month','currency']]
+    grouped_df = grouped_df[['supplier','product','state','tariff','count','rental','sms','data','total','month','currency']]
 
     #Output the file
-    print "Generating report for invoice " + report_month
+    print "Generating report for invoice " + dt.strftime(month, "%m-%Y")
     grouped_df.to_csv(grouped_report_filename)
     
+
 ####################################################################################################
 
 def create_wl_report(supplier, month):
@@ -653,6 +651,88 @@ def create_eseye_report(supplier, month):
 
     return report_df
 
+def create_VF_report(supplier, month):
+
+    invoice_filename = "{}_invoice_{}.csv".format(dt.strftime(month, '%Y%m'),supplier)
+    invoice_path = make_invoice_path(supplier)
+
+    report_filename = make_report_filename(month, supplier)
+    report_path = './Itemised Reports/{}/'.format(supplier)
+    
+    report_df = pd.read_csv(invoice_path + invoice_filename, dtype={'IMSI': str})
+
+    #Drop any rows where PRODUCT is empty
+    report_df.dropna(subset=['PRODUCT'], inplace=True)
+
+    print report_df.shape[0]
+
+    # Just keep the columns we're interested in
+    report_df = report_df[['IMSI','TARIFF NAME', 'NET CHARGE', 'PRODUCT', 'USAGE TYPE DESC']]
+
+    #Drop any NET CHARGE rows that aren't a number
+    #report_df = report_df[report_df['NET CHARGE'] != 'TRUE']
+
+    print report_df.shape[0]
+
+    #Group by imsi, to consolidate multiple items of same type
+    report_df = report_df.groupby(['IMSI','USAGE TYPE DESC'], axis = 0).agg({'TARIFF NAME': 'first',
+                                                                            'NET CHARGE': sum,
+                                                                            'PRODUCT': 'first',
+                                                                            })
+
+    report_df = report_df.reset_index()
+
+    #Rename some columns to make them easier to reference
+    report_df.rename(columns={'USAGE TYPE DESC': 'usage', 'TARIFF NAME': 'tariff'}, inplace=True)
+
+    #Make a dataframe with rental costs only
+    recurring_df = report_df[report_df.usage == 'Recurring Charge'][['IMSI','NET CHARGE']]
+    recurring_df.rename(columns = {'NET CHARGE': 'recurring'}, inplace=True)
+
+    #Get any non-recurring (registration?) costs and add them to the rental costs
+    nonrecurring_df = report_df[report_df.usage == 'Non Recurring Charge'][['IMSI','NET CHARGE']]
+    nonrecurring_df.rename(columns = {'NET CHARGE': 'non-recurring'}, inplace=True)
+
+    #Combine recurring and non-recurring rental charges
+    rental_df = pd.merge(recurring_df, nonrecurring_df, on='IMSI', how='outer')
+    rental_df['rental'] = rental_df[['recurring','non-recurring']].sum(1)
+    rental_df = rental_df[['IMSI','rental']]
+
+    #Make a dataframe with data costs only
+    data_df = report_df[report_df.usage == 'Packet Data Usage'][['IMSI','NET CHARGE']]
+    data_df.rename(columns = {'NET CHARGE': 'data'}, inplace=True)
+
+    #Make a dataframe  with SMS costs only
+    sms_df = report_df[report_df.usage == 'SMS MO'][['IMSI', 'NET CHARGE']]
+    sms_df.rename(columns = {'NET CHARGE': 'sms'}, inplace=True)
+
+    #Strip report_df down to just IMSI and drop duplicates
+    report_df = report_df[['IMSI','tariff']]
+    report_df.drop_duplicates('IMSI',inplace=True)
+
+    #Merge everything up
+    report_df = report_df.merge(rental_df, on="IMSI", how="left").merge(data_df, on="IMSI", how="left").merge(sms_df, on="IMSI", how="left")
+
+    #Add a column with total cost for each iccid
+    report_df['total']=report_df[['sms','data','rental']].sum(1)
+
+    #Rename the IMSI column
+    report_df.rename(columns = {'IMSI': 'imsi'}, inplace=True)
+
+    # Add the entity information from the product_entity_state dataframe
+    report_df = report_df.merge(product_entity_state_df, on="imsi", how="left")
+
+    #Any rows that don't have an entity assigned at this point must have been in products deleted from SmartSolar
+    report_df = report_df.fillna(value = {'entity': 'Product not in SmartSolar', 'tariff': '<deleted>',
+                                            'state': '<deleted>', 'product': '<deleted>'})
+
+    report_df.to_csv(report_path + report_filename)
+
+    return report_df
+
+
+
+
 ####################################################################################################
 
 def update_sim_list(supplier):
@@ -840,6 +920,10 @@ def update_sim_list(supplier):
         else:
             sim_list_df_dict[supplier] = pd.read_csv(eseye_sims_file)
 
+
+    elif supplier == 'VF':
+        pass
+
     else:
         print "Unidentified SIM supplier!!!"
 
@@ -856,19 +940,19 @@ if __name__ == '__main__':
 
 
     #Check for new invoices via the suppliers' APIs
-    for supplier in supplier_list:
+    # for supplier in supplier_list:
 
-        print "Looking for new invoices from " + supplier
+    #     print "Looking for new invoices from " + supplier
 
-        download_new_invoices(supplier)
+    #     download_new_invoices(supplier)
 
-    #Update SIM/tariff lists from each supplier and open them
+    # #Update SIM/tariff lists from each supplier and open them
 
-    sim_list_df_dict = {} #We will store the sim_list_dfs in a dict so we can reference them by supplier
+    # sim_list_df_dict = {} #We will store the sim_list_dfs in a dict so we can reference them by supplier
 
-    for supplier in supplier_list:
+    # for supplier in supplier_list:
 
-        sim_list_df_dict = update_sim_list(supplier)
+    #     sim_list_df_dict = update_sim_list(supplier)
 
 
 
@@ -884,6 +968,8 @@ if __name__ == '__main__':
     #We're not interested in this (i.e. current) month so just drop the last row. It doesn't have an end date anyway
     dates_df = dates_df[:-1]
 
+    #Get the tables from SmartSolar in case we need to make some new product_entity_state dataframes            
+    products_df, states_df, entities_df, pel_df, state_types_df, product_types_df = get_tables()
 
     #Loop through all the months in the month list
     for i, month in enumerate(dates_df.start_date):
@@ -899,23 +985,16 @@ if __name__ == '__main__':
         #Get the product_entity_state_df dataframe for this month
         pes_filename = "product_entity_state/{}_product_entity_state.csv".format(dt.strftime(month_start, '%y-%b'))
         
-        if os.path.isfile(pes_filename):
+        if os.path.isfile(pes_filename): #Look for existing dataframe first
             product_entity_state_df = pd.read_csv(pes_filename)
         else:
-            #Get the tables from SmartSolar
-            #But this is horribly inefficient, opening them for each month
-            #But but... this should not need to be done for more than one month per run anyway... two tops!
-            products_df, states_df, entities_df, pel_df, state_types_df = get_tables()
-            
             #Create a bespoke product_entity_state_df for this month
             product_entity_state_df = make_product_entity_state_df(month_start, month_end)
 
             product_entity_state_df.to_csv(pes_filename)
 
-        # print product_entity_state_df.head(10)
 
         #Workflow is different for each SIM provider
-
         for supplier in supplier_list:
 
             print "Working on " + supplier
@@ -972,3 +1051,19 @@ if __name__ == '__main__':
 
                     else:
                         print "No {} invoice exists for this month.".format(supplier)
+
+                elif supplier == 'VF':
+
+                    if os.path.isfile(os.path.join(invoice_path,invoice_fname)):
+
+                        #Create the full report
+                        report_df = create_VF_report(supplier, month)
+
+                        create_grouped_report(month, supplier, 'GBP')
+
+                    else:
+                        print "No {} invoice exists for this month.".format(supplier)
+                        
+
+                else:
+                    print "Mystery supplier!!!"            
