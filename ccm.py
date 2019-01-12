@@ -84,12 +84,12 @@ def make_df(data):
 
 def get_tables():
     db = rep.ReplicaDatabase()
-    # rep.download_table(db, 'product', save_json = True, debug = True)
-    # rep.download_table(db, 'state', save_json=True, debug=True)
-    # rep.download_table(db, 'entity', save_json=True, debug=True)
-    # rep.download_table(db, 'product_entity_linker', save_json=True, debug=True)
-    # rep.download_table(db, 'state_type', save_json=True, debug=True)
-    # rep.download_table(db, 'product_type', save_json=True, debug=True)
+    rep.download_table(db, 'product', save_json = True, debug = True)
+    rep.download_table(db, 'state', save_json=True, debug=True)
+    rep.download_table(db, 'entity', save_json=True, debug=True)
+    rep.download_table(db, 'product_entity_linker', save_json=True, debug=True)
+    rep.download_table(db, 'state_type', save_json=True, debug=True)
+    rep.download_table(db, 'product_type', save_json=True, debug=True)
 
     print "Opening Products table"
     with open('tables/product.json', 'rb') as rf:
@@ -227,6 +227,7 @@ def make_product_entity_state_df(month_start, month_end):
 
 
     return product_entity_state_df
+
 
 ########################################################################
 
@@ -618,6 +619,7 @@ def create_itemised_report(month, supplier):
         #Read the invoice file
         report_df = pd.read_csv(invoice_path + invoice_filename, dtype={'IMSI': str, 'ICCID': str, 'POOL NAME': str, 'RATE PLAN NAME': str})
 
+        
         # Just keep the columns we're interested in
         report_df = report_df[['IMSI',
                                 'ICCID',
@@ -639,7 +641,6 @@ def create_itemised_report(month, supplier):
         #lower case some columns
         report_df.rename(columns = {'ICCID': 'iccid', 'IMSI':'imsi', 'RATE PLAN NAME':'tariff'}, inplace=True)
 
-
         #Drop any rows where 'BILL STATUS' is 'PROV'
         report_df = report_df[report_df['BILL STATUS'] != 'PROV']
 
@@ -650,7 +651,8 @@ def create_itemised_report(month, supplier):
         #Get rid of any extraneous punctuation in the invoice data (e.g. =")
         def strip_extraneous(report_df):
             report_df['iccid'] = re.findall("\d+", report_df['iccid'])[0] #re.findall returns a list, \d+ matches one or more digits
-            report_df['imsi'] = re.findall("\d+", report_df['imsi'])[0]
+            report_df['imsi'] = report_df['imsi'].strip("=")
+            report_df['imsi'] = report_df['imsi'].strip("\"")
             report_df['tariff'] = report_df['tariff'].strip("=")
             report_df['tariff'] = report_df['tariff'].strip("\"")
             report_df['POOL NAME'] = report_df['POOL NAME'].strip("=")
@@ -659,8 +661,7 @@ def create_itemised_report(month, supplier):
 
         report_df = report_df.apply(strip_extraneous, axis=1)
             
-        
-        #Group by ItemRef, to consolidate multiple items of same type
+        #Group by imsi, to consolidate multiple items of same type
         report_df = report_df.groupby(['imsi'], axis = 0).agg({'iccid': 'first',
                                                                 'TOTAL MONTHLY CHARGES': sum,
                                                                 'TOTAL DEVICE CHARGES': sum,
@@ -675,9 +676,16 @@ def create_itemised_report(month, supplier):
                                                                 'BILL SMS MT TRAFFIC CHARGES': sum,
                                                                 'BILL SMS MO TRAFFIC CHARGES': sum,
                                                                 'BILL PKT KB': sum})
-
+        
         report_df = report_df.reset_index()
 
+        #Force all IMSIs to strings just in case, to ensure the join works as well as possible
+        report_df.imsi = report_df.imsi.astype('str')
+        product_entity_state_df.imsi = product_entity_state_df.imsi.astype('str')
+
+        #Merge with product_entity_state dataframe
+        report_df = report_df.merge(product_entity_state_df, on='imsi', how='left')
+        
         #Rename some columns
         report_df = report_df.rename(index=str,
                             columns={'TOTAL DEVICE CHARGES': 'total',
@@ -689,12 +697,8 @@ def create_itemised_report(month, supplier):
         #Add a column with total sms cost for each imsi
         report_df['sms']=report_df[['sms_mo','sms_mt']].sum(1)
 
-        #Merge with product_entity_state dataframe
-        report_df = report_df.merge(product_entity_state_df, on='imsi', how='left')
-
-
         #If entity field is blank, SIM has likely been provisioned but not put in a product yet
-        report_df = report_df.fillna(value = {'entity_id': 0, 'entity': 'Unassigned spare part', 'state': '<spare_part>'})
+        report_df = report_df.fillna(value = {'entity_id': 0, 'entity': 'Unassigned spare part', 'state': '<spare_part>', 'product': '<spare part>'})
         
         #Just pull the fields we are interested in
         report_df = report_df.drop(['iccid_y'], axis=1)
