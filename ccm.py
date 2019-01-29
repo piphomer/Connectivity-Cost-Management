@@ -445,7 +445,7 @@ def make_invoice_filename(invoice,supplier):
 def make_report_filename(month, supplier):
 
     #Generate a nicer date string to name the report by
-    report_filename = dt.strftime(month, "%Y-%m (%b)") + " " + supplier + " Cost Report.csv"
+    report_filename = dt.strftime(month, "%Y-%m (%b)") + " " + supplier + " Itemised Report.csv"
 
     print report_filename
     
