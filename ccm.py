@@ -369,7 +369,12 @@ def update_sim_list(supplier):
 
     elif supplier == 'Intelligent':
         #We only need to get wl_sim_list once so we'll do that on WL and do nothing here
-        sim_list_df_dict[supplier] = sim_list_df_dict['WL']
+        #But, just keep the Intelligent SIMs
+        intelligent_sims_df = sim_list_df_dict['WL']
+
+        intelligent_sims_df = intelligent_sims_df[intelligent_sims_df.mno_account == "intelligent"]
+
+        sim_list_df_dict[supplier] = intelligent_sims_df
 
     elif supplier == 'Aeris':
 
@@ -562,9 +567,13 @@ def create_itemised_report(month, supplier):
         #Read the invoice file
         try:
             report_df = pd.read_csv(invoice_path + invoice_filename, dtype={'imsi': str, 'iccid': str})
+            # report_df = pd.read_csv(invoice_path + invoice_filename, dtype={'ctn': str}) #There is no imsi or iccid in a WL invoice!! Only CTN
         except:
             print "Invoice {} does not seem to exist! Skipping...".format(invoice_filename)
             return
+
+        print report_df.head(5)
+        print report_df.shape[0]
 
         #Just keep the columns we're interested in
         report_df = report_df[['ctn','rental','gprs','gprs_usage','gprsroam',
@@ -573,11 +582,9 @@ def create_itemised_report(month, supplier):
         #Merge the tariffs
         report_df = report_df.merge(sim_list_df_dict[supplier], on='ctn', how='left')
 
-
         #Sum the gprs + gprs_roam values and sms + sms_roam values
         report_df['gprs'] = report_df['gprs'] + report_df['gprsroam']
         report_df['sms'] = report_df['sms'] + report_df['smsroam']
-
 
         #Merge with product_entity_state_df
         #Do it on ICCID if Intelligent, IMSI if not
@@ -935,7 +942,7 @@ if __name__ == '__main__':
 
 
     #Make the list of months for which to create reports
-    date_list = pd.date_range('2014-01-01', TODAY, freq='MS').tolist()
+    date_list = pd.date_range('2018-01-01', TODAY, freq='MS').tolist()
 
     #Turn the list into a dataframe
     dates_df = pd.DataFrame(date_list, columns=['start_date'])
