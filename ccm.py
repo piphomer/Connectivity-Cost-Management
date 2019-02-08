@@ -461,7 +461,7 @@ def make_report_filename(month, supplier):
 def make_grouped_report_filename(month, supplier):
        
     #Generate a nicer date string to name the report by
-    grouped_report_filename = "./CCM Reports/" + dt.strftime(month, "%Y-%m (%b)") + " - {} - CCM Report.csv".format(supplier)
+    grouped_report_filename = "./Summary Reports/" + dt.strftime(month, "%Y-%m (%b)") + " - {} - Summary Report.csv".format(supplier)
 
     return grouped_report_filename
 
@@ -571,9 +571,6 @@ def create_itemised_report(month, supplier):
         except:
             print "Invoice {} does not seem to exist! Skipping...".format(invoice_filename)
             return
-
-        print report_df.head(5)
-        print report_df.shape[0]
 
         #Just keep the columns we're interested in
         report_df = report_df[['ctn','rental','gprs','gprs_usage','gprsroam',
