@@ -17,6 +17,8 @@ supplier_list = ['WL','Intelligent','Aeris', 'Eseye', 'VF']
 
 currency_dict = {'WL': 'GBP', 'Intelligent': 'USD', 'Aeris': 'GBP', 'Eseye': 'USD', 'VF': 'GBP'}
 
+month_zero = '2014-01-01'
+
 tables_flag = None
 
 ########################################################################
@@ -135,6 +137,9 @@ def make_product_entity_state_df(month_start, month_end):
     #Join pel_df and entity_df
     product_entity_state_df = pel_df.merge(entities_df, on='entity_id', how="left")
 
+    #Drop all "Orange Energy All" entries
+    product_entity_state_df = product_entity_state_df[product_entity_state_df.entity != "Orange Energy All"]
+
     #Make date_added a datetime object
     product_entity_state_df.date_added = pd.to_datetime(product_entity_state_df.date_added)
 
@@ -160,15 +165,15 @@ def make_product_entity_state_df(month_start, month_end):
 
         if group.shape[0] > 1: #only look at imei's with more than one current entity
 
-            #print imei
+            print imei
 
             #First, remove this IMEI from the dataframe entirely. We will then add back in only the row we deem relevant
             product_entity_state_df = product_entity_state_df.drop(imei)
 
             if group.shape[0] > 1:
                 group = group[group['entity'] != 'Unknown Entity'] #remove rows that are Unknown Entity
-            if group.shape[0] > 1:
-                group = group[group['entity'] != 'Orange Energy All'] #remove rows that are Orange Energy All
+            # if group.shape[0] > 1:
+            #     group = group[group['entity'] != 'Orange Energy All'] #remove rows that are Orange Energy All
             if group.shape[0] > 1:
                 group = group[group['entity'] != 'Aceleron'] #remove rows that are Aceleron
             if group.shape[0] > 1:
@@ -939,7 +944,7 @@ if __name__ == '__main__':
 
 
     #Make the list of months for which to create reports
-    date_list = pd.date_range('2018-01-01', TODAY, freq='MS').tolist()
+    date_list = pd.date_range(month_zero, TODAY, freq='MS').tolist()
 
     #Turn the list into a dataframe
     dates_df = pd.DataFrame(date_list, columns=['start_date'])
