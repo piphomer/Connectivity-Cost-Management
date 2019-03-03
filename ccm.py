@@ -13,7 +13,6 @@ import datetime
 import ccm_replica as rep
 
 supplier_list = ['WL','Intelligent','Aeris', 'Eseye', 'VF']
-#supplier_list = ['VF']
 
 currency_dict = {'WL': 'GBP', 'Intelligent': 'USD', 'Aeris': 'GBP', 'Eseye': 'USD', 'VF': 'GBP'}
 
@@ -86,12 +85,15 @@ def make_df(data):
 
 def get_tables():
     db = rep.ReplicaDatabase()
-    rep.download_table(db, 'product', save_json = True, debug = True)
-    rep.download_table(db, 'state', save_json=True, debug=True)
-    rep.download_table(db, 'entity', save_json=True, debug=True)
-    rep.download_table(db, 'product_entity_linker', save_json=True, debug=True)
-    rep.download_table(db, 'state_type', save_json=True, debug=True)
-    rep.download_table(db, 'product_type', save_json=True, debug=True)
+    # rep.download_table(db, 'product', save_json = True, debug=True)
+    # rep.download_table(db, 'state', save_json=True, debug=True)
+    # rep.download_table(db, 'entity', save_json=True, debug=True)
+    # rep.download_table(db, 'product_entity_linker', save_json=True, debug=True)
+    # rep.download_table(db, 'state_type', save_json=True, debug=True)
+    # rep.download_table(db, 'product_type', save_json=True, debug=True)
+    # rep.download_table(db, 'part', save_json=True, debug=True)
+    # rep.download_table(db, 'part_type', save_json=True, debug=True)
+    # rep.download_sim_table(db, 'sim_table', save_json=True, debug=True) #use a unique query because the ppl table is too large
 
     print "Opening Products table"
     with open('tables/product.json', 'rb') as rf:
@@ -101,7 +103,7 @@ def get_tables():
     print "Opening States table"
     with open('tables/state.json', 'rb') as rf:
         states_df = make_df(json.load(rf))
-        states_df = states_df[['state_id','product_imei','current_state_type','created_at']]
+        # states_df = states_df[['state_id','product_imei','current_state_type','created_at']]
         states_df.created_at = pd.to_datetime(states_df.created_at)
         states_df.product_imei = states_df.product_imei.astype('str')
         #states_df.set_index('product_imei', inplace=True)
@@ -129,13 +131,20 @@ def get_tables():
         product_types_df = product_types_df[['product_type_id', 'name']]
         product_types_df.rename(columns = {'name': 'product'}, inplace=True)
 
-    return products_df, states_df, entities_df, pel_df, state_types_df, product_types_df
+    print "Opening SIM table"
+    with open('tables/sim_table.json', 'rb') as rf:
+        sim_parts_df = make_df(json.load(rf))
+
+    return products_df, states_df, entities_df, pel_df, state_types_df, product_types_df, sim_parts_df
 
 
 def make_product_entity_state_df(month_start, month_end):
 
     #Join pel_df and entity_df
     product_entity_state_df = pel_df.merge(entities_df, on='entity_id', how="left")
+
+    #Join the SIM table
+    product_entity_state_df = product_entity_state_df.merge(sim_parts_df, on='product_imei', how='left')
 
     #Drop all "Orange Energy All" entries
     product_entity_state_df = product_entity_state_df[product_entity_state_df.entity != "Orange Energy All"]
@@ -172,8 +181,6 @@ def make_product_entity_state_df(month_start, month_end):
 
             if group.shape[0] > 1:
                 group = group[group['entity'] != 'Unknown Entity'] #remove rows that are Unknown Entity
-            # if group.shape[0] > 1:
-            #     group = group[group['entity'] != 'Orange Energy All'] #remove rows that are Orange Energy All
             if group.shape[0] > 1:
                 group = group[group['entity'] != 'Aceleron'] #remove rows that are Aceleron
             if group.shape[0] > 1:
@@ -193,7 +200,7 @@ def make_product_entity_state_df(month_start, month_end):
 
     print "Merging with the Products table"
     #Join the Product table so we can get the IMSI and the ICCID
-    product_entity_state_df = product_entity_state_df.merge(products_df[['imsi','iccid','product_imei', 'product_type_id']], left_index=True, right_on='product_imei')
+    product_entity_state_df = product_entity_state_df.merge(products_df, left_index=True, right_on='product_imei')
 
     #Join the Product Types table
     product_entity_state_df = product_entity_state_df.merge(product_types_df, on='product_type_id', how='left')
@@ -204,9 +211,8 @@ def make_product_entity_state_df(month_start, month_end):
 
     print "Length of states table after removing states created after this month: ", states_filtered_df.shape[0]
 
-
     #Only keep the latest state for each product, that should be the state at month end.
-    
+   
     print "Finding latest state for this month."
 
     #Just save the most recent state    
@@ -217,6 +223,7 @@ def make_product_entity_state_df(month_start, month_end):
     product_entity_state_df = product_entity_state_df.sort_values('product_imei')
     states_filtered_df = states_filtered_df.sort_index()
 
+    #Join the states back to the IMEIs
     product_entity_state_df = product_entity_state_df.merge(states_filtered_df, how='left', left_on='product_imei', right_index=True)
 
     print "product_entity_state_df size after merge: {}".format(product_entity_state_df.shape[0])
@@ -228,8 +235,7 @@ def make_product_entity_state_df(month_start, month_end):
 
     #Drop unneeded columns
     product_entity_state_df.drop(['entity_id','date_added','date_removed','product_type_id',
-                                            'current_state_type','created_at','state_id', 'state_type_id',],axis=1, inplace=True)
-
+                                            'current_state_type','created_at','state_id', 'state_type_id'],axis=1, inplace=True)
 
     return product_entity_state_df
 
@@ -591,7 +597,7 @@ def create_itemised_report(month, supplier):
         #Merge with product_entity_state_df
         #Do it on ICCID if Intelligent, IMSI if not
         if supplier == 'WL':
-            report_df = report_df.merge(product_entity_state_df, on='imsi', how='left')
+            report_df = report_df.merge(product_entity_state_df, on='ctn', how='left')
         else:
             report_df = report_df.merge(product_entity_state_df, on='iccid', how='left')
 
@@ -976,7 +982,7 @@ if __name__ == '__main__':
             #If doing this for the first time on this run, open the SmartSolar tables
             if not tables_flag:
                #Get the tables from SmartSolar in case we need to make some new product_entity_state dataframes            
-                products_df, states_df, entities_df, pel_df, state_types_df, product_types_df = get_tables()
+                products_df, states_df, entities_df, pel_df, state_types_df, product_types_df, sim_parts_df = get_tables()
                 tables_flag = 1
             
             #Create a bespoke product_entity_state_df for this month
