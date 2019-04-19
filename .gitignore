@@ -1,0 +1,11 @@
+*.csv
+*.xls
+*.xlsx
+*.pyc
+*.txt
+*.pptx
+/invoices
+/itemisations
+/misc
+/summaries
+/tables

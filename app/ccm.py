@@ -496,6 +496,8 @@ def download_new_invoices(supplier):
 
         if r.status_code == 200:
             print "Invoice list succesfully downloaded."
+        elif r.status_code == 401:
+            print "Unauthorized!"
         else:
             print "Need to add an error handler!"
             return
