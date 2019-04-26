@@ -304,7 +304,10 @@ def update_sim_list(supplier):
                 
                 for number in range(iccids_per_call):
                     try:
-                        iccid_string = iccid_string +"," + wl_sims_list[start_iccid + number]
+                        if len(iccid_string) == 0:
+                            iccid_string = wl_sims_list[start_iccid + number]
+                        else:
+                            iccid_string = iccid_string + "," + wl_sims_list[start_iccid + number]
                     except:
                         print "Error in generating the iccid string to send to the API!"
                         print "These are probably just the last page phantom ones"
@@ -317,12 +320,11 @@ def update_sim_list(supplier):
 
                 r = requests.get(url=URL, auth=AUTH)
 
-                #print r.status_code
+                # print r.status_code
 
                 r_json = r.json()
 
-                #print json.dumps(r_json, indent=4, sort_keys=True)
-
+                # print json.dumps(r_json, indent=4, sort_keys=True)
 
                 for index, json_data in enumerate(r_json):
 
