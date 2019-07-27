@@ -12,7 +12,7 @@ import datetime
 
 import ccm_replica as rep
 
-supplier_list = ['WL','Intelligent','Aeris', 'Eseye', 'Vodafone']
+supplier_list = ['WL','Intelligent','Aeris','Eseye','Vodafone']
 
 currency_dict = {'WL': 'GBP', 'Intelligent': 'USD', 'Aeris': 'GBP', 'Eseye': 'USD', 'Vodafone': 'GBP'}
 
@@ -85,15 +85,15 @@ def make_df(data):
 
 def get_tables():
     db = rep.ReplicaDatabase()
-    # rep.download_table(db, 'product', save_json = True, debug=True)
-    # rep.download_table(db, 'state', save_json=True, debug=True)
-    # rep.download_table(db, 'entity', save_json=True, debug=True)
-    # rep.download_table(db, 'product_entity_linker', save_json=True, debug=True)
-    # rep.download_table(db, 'state_type', save_json=True, debug=True)
-    # rep.download_table(db, 'product_type', save_json=True, debug=True)
+    rep.download_table(db, 'product', save_json=True, debug=True)
+    rep.download_table(db, 'state', save_json=True, debug=True)
+    rep.download_table(db, 'entity', save_json=True, debug=True)
+    rep.download_table(db, 'product_entity_linker', save_json=True, debug=True)
+    rep.download_table(db, 'state_type', save_json=True, debug=True)
+    rep.download_table(db, 'product_type', save_json=True, debug=True)
     # rep.download_table(db, 'part', save_json=True, debug=True)
     # rep.download_table(db, 'part_type', save_json=True, debug=True)
-    # rep.download_sim_table(db, 'sim_table', save_json=True, debug=True) #use a unique query because the ppl table is too large
+    rep.download_sim_table(db, 'sim_table', save_json=True, debug=True) #use a unique query because the ppl table is too large
 
     print "Opening Products table"
     with open('../tables/product.json', 'rb') as rf:

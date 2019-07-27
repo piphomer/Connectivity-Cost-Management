@@ -45,10 +45,10 @@ def download_table(db, table_name, save_csv=False, save_json=False, debug=False)
 
     if save_csv == True:
         # results_csv = pd.DataFrame(results)
-        results_csv.to_csv('tables/'+file_name+'.csv')
+        results_csv.to_csv('../tables/'+file_name+'.csv')
 
     if save_json == True:
-        results.to_json(path_or_buf='tables/'+file_name+'.json', orient='records', date_format='iso', date_unit='s')
+        results.to_json(path_or_buf='../tables/'+file_name+'.json', orient='records', date_format='iso', date_unit='s')
 
 
 def download_sim_table(db, table_name, save_csv=False, save_json=False, debug=False):
@@ -76,9 +76,9 @@ def download_sim_table(db, table_name, save_csv=False, save_json=False, debug=Fa
 
     if save_csv == True:
         # results_csv = pd.DataFrame(results)
-        results_csv.to_csv('tables/'+file_name+'.csv')
+        results_csv.to_csv('../tables/'+file_name+'.csv')
 
     if save_json == True:
-        results.to_json(path_or_buf='tables/'+file_name+'.json', orient='records', date_format='iso', date_unit='s')
+        results.to_json(path_or_buf='../tables/'+file_name+'.json', orient='records', date_format='iso', date_unit='s')
 
 
